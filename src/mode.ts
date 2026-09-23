@@ -245,13 +245,28 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
     if (!enabled || !dataset) return;
 
     if (code === null) { notifyFailure('commune-introuvable'); return; }
-    if (code === dataset.insee || code === loadingInsee) {
-      // Même commune : rien à recharger, et surtout rien à cacher — c'est le cas de
-      // loin le plus fréquent. La résolution a répondu, donc le réseau fonctionne : une
-      // prochaine panne mérite d'être annoncée même si elle ressemble à la précédente.
+    if (code === loadingInsee) {
+      // Un rechargement vers cette commune est déjà en vol : rien à relancer.
       lastFailureReason = null;
       return;
     }
+    if (code === dataset.insee && loadingInsee === null) {
+      // Même commune que le dataset actuel, et rien en vol : rien à recharger, et
+      // surtout rien à cacher — c'est le cas de loin le plus fréquent. La résolution a
+      // répondu, donc le réseau fonctionne : une prochaine panne mérite d'être annoncée
+      // même si elle ressemble à la précédente.
+      lastFailureReason = null;
+      return;
+    }
+    // Sinon on laisse passer, même si `code === dataset.insee` : un chargement vers une
+    // commune qu'on a quittée entre-temps (`loadingInsee`) est en vol, et `dataset.insee`
+    // ne s'est pas encore remis à jour pendant que ce chargement dure. Sans ce
+    // rechargement pour `code`, rien ne supplante ce chargement dépassé : il finirait par
+    // s'appliquer via `startLoad` (`d.insee !== dataset?.insee` serait vrai, puisque
+    // `dataset` pointe encore vers l'ancienne commune) et écraserait silencieusement le
+    // dataset alors que la carte est déjà repartie ailleurs (revue, re-revue). Réémettre
+    // pour `code` change `loading`, dont la garde d'identité de startLoad écarte alors
+    // cette résolution périmée.
 
     overlay?.hide(); // le contour affiché appartient à l'ancienne commune : honnête de l'effacer
     loadingInsee = code;

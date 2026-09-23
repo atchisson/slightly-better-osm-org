@@ -490,6 +490,74 @@ describe('mode cadastre', () => {
     }
   });
 
+  // --- Revue finale (re-revue) : un rechargement en vol qu'on a quitté doit être
+  // supplanté, pas laissé filer ---
+  //
+  // Trace : carte en A (dataset chargé) → panoramique vers B → le débounce lance
+  // startLoad(B), EN VOL une à trois secondes → panoramique de retour en A, DANS cette
+  // fenêtre. maybeReload résout alors `code === 'A'`. Comme `dataset.insee` vaut encore
+  // 'A' (le chargement vers B n'a pas encore abouti), la garde
+  // `code === dataset.insee` de la revue précédente rendait vrai et retournait tôt : AUCUN
+  // chargement n'est relancé pour A, et rien ne supplante le chargement vers B en vol.
+  // Quand B finit par se résoudre, `apply` compare `d.insee` ('B') à `dataset?.insee`
+  // ('A', inchangé) : ils diffèrent, donc `dataset` devient B — alors que la carte est
+  // revenue en A. Silencieux jusqu'au prochain déplacement : survol et clic répondent
+  // « aucun bâtiment » sur le point A parce qu'ils composent contre B.
+  it('un panoramique de retour dans l’ancienne commune, pendant qu’un rechargement vers une autre est en vol, ne laisse pas ce rechargement dépassé s’appliquer', async () => {
+    vi.useFakeTimers();
+    try {
+      const datasetA = buildDataset('49007', '2026', [feature('01', carre(0, 0))]);
+      const datasetB = buildDataset('49008', '2026', [feature('01', carre(0.5, 0.5))]);
+      const { promise: chargementB, resolve: resoudreChargementB } = deferred<Dataset>();
+
+      let appels = 0;
+      const loadDataset = vi.fn((): Promise<Dataset> => {
+        appels++;
+        if (appels === 1) return Promise.resolve(datasetA); // chargement initial
+        if (appels === 2) return chargementB;                // vers B : reste en vol
+        return Promise.resolve(datasetA);                    // retour vers A, une fois supplanté
+      });
+
+      const { declencherDeplacement } = bridgeAvecDeplacements(bridge);
+      let extent: [LonLat, LonLat] = [[0, 0], [0.01, 0.01]]; // centre (0.005, 0.005) : commune A
+      bridge.mapExtent = () => extent;
+
+      const mode = createMode(bridge, {
+        loadDataset,
+        communeCodeAt: async (pt: LonLat) => (pt[0] < 0.4 ? '49007' : '49008'),
+        communeName: async () => 'X',
+        notify: vi.fn(),
+      });
+      mode.enable();
+      await mode.whenReady(); // charge A
+
+      // Vers B : le rechargement démarre et reste EN VOL (chargementB non résolue).
+      extent = [[0.495, 0.495], [0.505, 0.505]];
+      declencherDeplacement();
+      await vi.advanceTimersByTimeAsync(600);
+
+      // Retour vers A, DANS la fenêtre où le rechargement vers B est encore en vol.
+      extent = [[0, 0], [0.01, 0.01]];
+      declencherDeplacement();
+      await vi.advanceTimersByTimeAsync(600);
+
+      // Le rechargement dépassé vers B se résout enfin.
+      resoudreChargementB(datasetB);
+      await mode.whenReady();
+
+      // La carte est en A : le survol doit montrer le bâtiment de A, pas rien (ce que
+      // donnerait un dataset devenu B par erreur).
+      mode.hoverAt([0.0005, 0.0005]);
+      expect(container.querySelector('path')!.getAttribute('d')).not.toBe('');
+
+      // Et surtout pas celui de B, qui n'a jamais dû s'installer.
+      mode.hoverAt([0.5, 0.5]);
+      expect(container.querySelector('path')!.getAttribute('d')).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // --- Revue finale (I3) : jamais de création à l'aveugle ---
   //
   // Contrat PRÉCÉDENT, remplacé ici : « clickAt attend un rechargement de commune en
