@@ -165,7 +165,7 @@ Construction des tags à partir du type cadastre et du millésime.
 
 Bouton de mode, calque de survol, messages de refus, réglages.
 
-Le calque de survol est un SVG **qui nous appartient**, superposé au conteneur de carte et recalé via `bridge.project()` sur les événements de déplacement. On ne s'insère pas dans le pipeline de rendu de iD : c'est ce qui garde la surface fragile minuscule.
+Le calque de survol est un SVG **qui nous appartient**, superposé à `surfaceNode()` — pas au conteneur de carte, voir la correction I1 du §4 : la distinction est précisément celle entre la racine de l'éditeur et l'élément dont le coin EST l'origine de `project()` — et recalé via `bridge.project()` sur les événements de déplacement. On ne s'insère pas dans le pipeline de rendu de iD : c'est ce qui garde la surface fragile minuscule.
 
 ### Build
 
