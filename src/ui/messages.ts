@@ -1,6 +1,7 @@
 import type { RefusalReason } from '../compose';
 
-export type AnyRefusal = RefusalReason | 'batiment-existant' | 'commune-introuvable' | 'reseau';
+export type AnyRefusal =
+  | RefusalReason | 'batiment-existant' | 'commune-introuvable' | 'reseau' | 'chargement-en-cours';
 
 const MESSAGES: Record<AnyRefusal, string> = {
   'aucun-batiment': 'Aucun bâtiment cadastre à cet endroit.',
@@ -17,6 +18,10 @@ const MESSAGES: Record<AnyRefusal, string> = {
   'batiment-existant': 'Un bâtiment OSM existe déjà ici : cette version ne remplace pas la géométrie existante.',
   'commune-introuvable': 'Commune introuvable ou hors couverture du cadastre français.',
   'reseau': 'Données cadastre indisponibles : vérifiez votre connexion.',
+  // Un clic pendant un chargement ne crée rien : l'aperçu au survol est caché tant que
+  // les données ne sont pas sûres, et créer sans aperçu c'est créer sans le seul
+  // garde-fou du projet (spec §5). Mieux vaut perdre un clic que créer à l'aveugle.
+  'chargement-en-cours': 'Données cadastre en cours de chargement : réessayez dès que le contour apparaît au survol.',
 };
 
 export function refusalMessage(reason: AnyRefusal): string {

@@ -256,7 +256,32 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
 
     async clickAt(pt) {
       if (!enabled) return;
-      await ensureDataset(pt);
+
+      // Jamais de création à l'aveugle.
+      //
+      // Cette fonction attendait `ensureDataset(pt)`. Or pendant toute cette attente,
+      // `hoverAt` cachait l'aperçu (`loading !== null`) : le bâtiment finalement créé
+      // n'avait JAMAIS été prévisualisé. La spec est explicite (§5) — l'aperçu au survol
+      // est le seul garde-fou contre une annexion erronée ; créer sans lui, c'est créer
+      // sans garde-fou. Et `enabled` n'était pas revérifié après l'attente : couper le
+      // mode pendant ce délai n'empêchait pas la création.
+      //
+      // On préfère donc « ne jamais créer à l'aveugle » à « ne jamais perdre un clic » :
+      // si un chargement est en vol, on ne crée rien et on le dit ; la personne
+      // recliquera quand elle verra un contour. La contrepartie est acquise dès
+      // l'entrée : passé ces deux gardes, plus AUCUNE attente ne précède
+      // `createBuilding` — il n'y a donc plus de fenêtre où l'état pourrait changer
+      // entre la décision et la création, et plus rien à revérifier après un await.
+      if (loading !== null) { notify(refusalMessage('chargement-en-cours')); return; }
+      if (!dataset) {
+        // Rien de chargé et rien en vol : le premier chargement a échoué, ou n'a jamais
+        // eu lieu. Le clic le relance (sans l'attendre) plutôt que de ne rien faire du
+        // tout, ce qui laisserait un mode définitivement inerte après une panne réseau.
+        void ensureDataset(pt);
+        notify(refusalMessage('chargement-en-cours'));
+        return;
+      }
+
       const r = compose(pt);
       if (!r) return;
       if (!r.ok) {
@@ -283,8 +308,15 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       const tags = buildingTags({ isolatedLight: r.isolatedLight, millesime: dataset!.millesime });
 
       bridge.createBuilding(snapped.ring, tags, snapped.reused);
-      bridge.prefillChangeset(changesetComment(await communeName(pt)));
       overlay?.hide();
+
+      // Après la création seulement : le préremplissage du changeset est une obligation
+      // d'attribution (Licence Ouverte, §7), pas une condition de création. Il ne doit
+      // ni retarder l'effet visible du clic, ni être annulé parce que le mode a été
+      // coupé entre-temps — le bâtiment, lui, existe. Un échec de résolution du nom ne
+      // doit pas davantage faire échouer la promesse de clickAt après coup.
+      const nom = await communeName(pt).catch(() => '');
+      bridge.prefillChangeset(changesetComment(nom));
     },
   };
 }

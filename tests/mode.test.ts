@@ -345,14 +345,17 @@ describe('mode cadastre', () => {
     }
   });
 
-  // --- Revue (deuxième passe) : clickAt doit attendre un rechargement en cours ---
+  // --- Revue finale (I3) : jamais de création à l'aveugle ---
   //
-  // ensureDataset() retournait immédiatement dès que `dataset` existait — même si
-  // `loading` pointait vers un rechargement en cours pour une AUTRE commune. Un clic
-  // pendant cette fenêtre composait contre l'ancien dataset et échouait en silence avec
-  // « aucun bâtiment » (non notifié : voir clickAt) — le symptôme exact du défaut
-  // initial, réduit d'une fenêtre permanente à une fenêtre transitoire.
-  it('clickAt attend un rechargement de commune en cours plutôt que de composer contre l’ancien dataset', async () => {
+  // Contrat PRÉCÉDENT, remplacé ici : « clickAt attend un rechargement de commune en
+  // cours plutôt que de composer contre l'ancien dataset ». Il réglait bien le défaut
+  // visé (composer contre des données périmées), mais en laissait passer un plus grave :
+  // pendant toute cette attente, hoverAt cache l'aperçu (`loading !== null`), donc le
+  // bâtiment finalement créé n'avait JAMAIS été prévisualisé. Or l'aperçu au survol est
+  // le seul garde-fou du projet contre une annexion erronée (spec §5) ; créer sans lui,
+  // c'est créer sans garde-fou. On préfère désormais perdre un clic plutôt que créer à
+  // l'aveugle : le clic ne crée rien, et le dit.
+  it('un clic pendant un rechargement de commune ne crée rien et le dit', async () => {
     vi.useFakeTimers();
     try {
       const datasetA = buildDataset('49007', '2026', [feature('01', carre(0, 0))]);
@@ -362,37 +365,100 @@ describe('mode cadastre', () => {
       let appels = 0;
       const loadDataset = vi.fn(async (): Promise<Dataset> => {
         appels++;
-        return appels === 1 ? datasetA : chargementB; // 1er appel : A, immediat ; 2e : B, différé
+        return appels === 1 ? datasetA : chargementB; // 1er appel : A, immédiat ; 2e : B, différé
       });
 
       const { declencherDeplacement } = bridgeAvecDeplacements(bridge);
       let extent: [LonLat, LonLat] = [[0, 0], [0.01, 0.01]];
       bridge.mapExtent = () => extent;
+      const notify = vi.fn();
 
-      const mode = createMode(bridge, { loadDataset, communeName: async () => 'X', notify: vi.fn() });
+      const mode = createMode(bridge, {
+        loadDataset,
+        communeName: async () => 'X',
+        notify,
+      });
       mode.enable();
       await mode.whenReady(); // charge A
 
-      // Franchissement de frontière : le rechargement démarre mais reste EN VOL (la
-      // promesse différée n'est pas encore résolue).
+      // Franchissement de frontière : le rechargement démarre mais reste EN VOL.
       extent = [[0.495, 0.495], [0.505, 0.505]];
       declencherDeplacement();
-      await vi.advanceTimersByTimeAsync(600); // le débounce se déclenche, startLoad(B) démarre
+      await vi.advanceTimersByTimeAsync(600);
 
-      // Un clic sur un point qui n'existe que dans B, PENDANT que le rechargement de B
-      // est encore en vol : ne doit ni créer sur la base de l'ancien dataset (A, où ce
-      // point est « aucun bâtiment », silencieusement ignoré) ni avancer avant que B
-      // soit disponible.
-      const clic = mode.clickAt([0.5, 0.5]);
-      expect(created).toHaveLength(0); // toujours en attente à ce stade précis
+      await mode.clickAt([0.5, 0.5]);
 
+      // Ni création contre l'ancien dataset (A, où ce point est « aucun bâtiment »,
+      // silencieux), ni création contre B sans l'avoir montré au survol.
+      expect(created).toHaveLength(0);
+      expect(notify).toHaveBeenCalledWith(expect.stringMatching(/chargement/i));
+
+      // Et une fois B là, le même clic crée — la donnée est sûre, l'aperçu la montre.
       resoudreChargementB(datasetB);
-      await clic;
-
-      expect(created).toHaveLength(1); // le clic a bien utilisé les données de B, pas un no-op silencieux
+      await mode.whenReady();
+      await mode.clickAt([0.5, 0.5]);
+      expect(created).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('un clic avant le tout premier chargement ne crée rien et le dit', async () => {
+    const attente = deferred<Dataset>();
+    const notify = vi.fn();
+    const mode = createMode(bridge, {
+      loadDataset: () => attente.promise,
+      communeName: async () => 'Angers',
+      notify,
+    });
+    mode.enable();
+
+    await mode.clickAt([0.0005, 0.0005]);
+
+    expect(created).toHaveLength(0);
+    expect(notify).toHaveBeenCalledWith(expect.stringMatching(/chargement/i));
+    attente.resolve(buildDataset('49007', '2026', [feature('01', carre(0, 0))]));
+  });
+
+  it('un clic après un chargement raté relance un chargement au lieu de rester inerte', async () => {
+    let appels = 0;
+    const loadDataset = vi.fn(async (): Promise<Dataset> => {
+      appels++;
+      if (appels === 1) throw new Error('panne réseau');
+      return buildDataset('49007', '2026', [feature('01', carre(0, 0))]);
+    });
+    const notify = vi.fn();
+    const mode = createMode(bridge, { loadDataset, communeName: async () => 'X', notify });
+    mode.enable();
+    await mode.whenReady();          // le premier chargement échoue : dataset reste null
+
+    await mode.clickAt([0.0005, 0.0005]);
+    expect(created).toHaveLength(0);
+    await mode.whenReady();          // le clic a relancé un chargement : il réussit
+
+    await mode.clickAt([0.0005, 0.0005]);
+    expect(created).toHaveLength(1);
+  });
+
+  // La contrepartie du refus ci-dessus : passé les gardes d'entrée, PLUS AUCUNE attente
+  // ne précède createBuilding. C'est ce qui rend inutile de revérifier `enabled` après
+  // un await — il n'y a plus d'await où l'état puisse changer. Ici, le nom de commune
+  // ne se résout jamais : la création doit avoir eu lieu quand même.
+  it('ne fait attendre aucune requête avant de créer', async () => {
+    const jamais = deferred<string>();
+    const mode = createMode(bridge, {
+      loadDataset: async () => buildDataset('49007', '2026', [feature('01', carre(0, 0))]),
+      communeName: () => jamais.promise,
+      notify: vi.fn(),
+    });
+    mode.enable();
+    await mode.whenReady();
+
+    void mode.clickAt([0.0005, 0.0005]);
+    await Promise.resolve();
+
+    expect(created).toHaveLength(1);
+    jamais.resolve('Angers');
   });
 
   // --- Revue (deuxième passe) : un booléen ne peut pas savoir s'il est le plus récent ---

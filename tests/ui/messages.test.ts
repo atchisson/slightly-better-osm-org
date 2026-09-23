@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { refusalMessage } from '../../src/ui/messages';
 
 const TOUS = ['aucun-batiment', 'trou-source', 'degenere', 'pincement', 'trou',
-  'parties-multiples', 'vide', 'batiment-existant', 'commune-introuvable', 'reseau'] as const;
+  'parties-multiples', 'vide', 'batiment-existant', 'commune-introuvable', 'reseau',
+  'chargement-en-cours'] as const;
 
 describe('refusalMessage', () => {
   for (const raison of TOUS) {
