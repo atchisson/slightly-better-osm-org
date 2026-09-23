@@ -18,6 +18,32 @@ const fauxBridge = (container: HTMLElement): IdBridge => ({
   containerNode: () => container,
 });
 
+// Bridge qui capture réellement le callback d'onMapMove (au lieu du no-op ci-dessus) :
+// `declencherDeplacement` simule un déplacement de carte en l'appelant, et le
+// désabonnement rendu par onMapMove retire réellement le callback de `listeners` — ce
+// qui permet de vérifier qu'un overlay détruit s'y désabonne pour de vrai, pas
+// seulement en le lisant à côté de l'implémentation.
+const fauxBridgeAvecDeplacements = (container: HTMLElement) => {
+  const listeners = new Set<() => void>();
+  let scale = 100;
+  const bridge: IdBridge = {
+    mapExtent: () => [[0, 0], [1, 1]],
+    project: (p) => [p[0] * scale, p[1] * scale],
+    invert: (p) => [p[0] / scale, p[1] / scale],
+    onMapMove: (cb) => { listeners.add(cb); return () => listeners.delete(cb); },
+    buildingsNear: () => [],
+    nodesNear: () => [],
+    createBuilding: () => {},
+    prefillChangeset: () => {},
+    containerNode: () => container,
+  };
+  return {
+    bridge,
+    setScale: (s: number) => { scale = s; },
+    declencherDeplacement: () => { for (const cb of listeners) cb(); },
+  };
+};
+
 describe('overlay', () => {
   let container: HTMLElement;
   beforeEach(() => {
@@ -27,7 +53,13 @@ describe('overlay', () => {
 
   it('n’affiche rien tant qu’on n’a rien montré', () => {
     createOverlay(fauxBridge(container));
-    expect(container.querySelector('path')?.getAttribute('d')).toBeFalsy();
+    // Deux assertions distinctes, volontairement : le `<path>` doit exister (sinon ce
+    // test passerait même si createOverlay n'en créait jamais un — un `?.` sur un
+    // querySelector qui renvoie null est falsy comme un `d` vide), ET son `d` doit être
+    // vide.
+    const path = container.querySelector('path');
+    expect(path).not.toBeNull();
+    expect(path!.getAttribute('d')).toBe('');
   });
 
   it('trace le contour projeté', () => {
@@ -47,6 +79,17 @@ describe('overlay', () => {
     expect(container.querySelector('path')!.getAttribute('class')).not.toBe(okClass);
   });
 
+  // Revue de la tâche 15 : un garde sur « l'état a-t-il changé depuis le dernier show()
+  // ? » laissait le tout premier show('ok') d'une session sans le suffixe de classe
+  // cadastre-id-ok (la classe restait au défaut posé à la construction), ce suffixe
+  // n'apparaissant qu'après être passé par 'refus' au moins une fois. Ce test porte
+  // spécifiquement sur le TOUT PREMIER appel, sans show('refus') préalable.
+  it('porte la classe d’état dès le tout premier show(), sans refus préalable', () => {
+    const o = createOverlay(fauxBridge(container));
+    o.show(carre, 'ok');
+    expect(container.querySelector('path')!.getAttribute('class')).toContain('cadastre-id-ok');
+  });
+
   it('efface le contour', () => {
     const o = createOverlay(fauxBridge(container));
     o.show(carre, 'ok');
@@ -58,5 +101,37 @@ describe('overlay', () => {
     const o = createOverlay(fauxBridge(container));
     o.destroy();
     expect(container.querySelector('svg')).toBeNull();
+  });
+
+  it('redessine sur un déplacement de carte simulé tant que l’overlay est vivant', () => {
+    const { bridge, setScale, declencherDeplacement } = fauxBridgeAvecDeplacements(container);
+    const o = createOverlay(bridge);
+    o.show(carre, 'ok');
+    expect(container.querySelector('path')!.getAttribute('d')).toContain('100 0');
+
+    setScale(200); // simule un zoom : reprojette tous les points différemment
+    declencherDeplacement();
+
+    expect(container.querySelector('path')!.getAttribute('d')).toContain('200 0');
+  });
+
+  // Reproduit précisément le risque nommé dans la tâche 15 : un overlay détruit qui
+  // continue de redessiner contre un conteneur qu'il ne possède plus. Le nœud `path`
+  // est capturé AVANT destroy() ; s'il redessinait encore après, cette même référence
+  // porterait le nouveau `d` même si le `<svg>` a été retiré du conteneur.
+  it('arrête de redessiner après destroy()', () => {
+    const { bridge, setScale, declencherDeplacement } = fauxBridgeAvecDeplacements(container);
+    const o = createOverlay(bridge);
+    o.show(carre, 'ok');
+    const path = container.querySelector('path')!;
+
+    o.destroy();
+    const dApresDestroy = path.getAttribute('d');
+
+    setScale(200);
+    declencherDeplacement(); // si le désabonnement avait échoué, ceci redessinerait
+
+    expect(path.getAttribute('d')).toBe(dApresDestroy);
+    expect(path.getAttribute('d')).not.toContain('200 0');
   });
 });

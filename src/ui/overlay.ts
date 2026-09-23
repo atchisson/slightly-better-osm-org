@@ -39,7 +39,6 @@ export function createOverlay(bridge: IdBridge): Overlay {
   // de carte (draw), jamais mémorisé en coordonnées écran — sinon un pan ou un zoom
   // laisserait le contour affiché à l'ancienne position.
   let current: Ring | null = null;
-  let currentState: 'ok' | 'refus' = 'ok';
 
   const draw = (): void => {
     if (!current) { path.setAttribute('d', ''); return; }
@@ -60,12 +59,13 @@ export function createOverlay(bridge: IdBridge): Overlay {
   return {
     show(ring, state) {
       current = ring;
-      if (state !== currentState) {
-        currentState = state;
-        path.setAttribute('class', `cadastre-id-preview cadastre-id-${state}`);
-        path.setAttribute('fill', state === 'ok' ? 'rgba(64,160,255,0.25)' : 'rgba(224,80,80,0.25)');
-        path.setAttribute('stroke', state === 'ok' ? '#2e7dd7' : '#c23b3b');
-      }
+      // Appliqué sans condition sur un changement d'état : un premier `show('ok')` de
+      // session doit porter la classe `cadastre-id-ok` au même titre qu'un `show('ok')`
+      // qui suit un `show('refus')` — revue de la tâche 15, un garde sur l'état
+      // précédent laissait le tout premier appel sans le suffixe d'état.
+      path.setAttribute('class', `cadastre-id-preview cadastre-id-${state}`);
+      path.setAttribute('fill', state === 'ok' ? 'rgba(64,160,255,0.25)' : 'rgba(224,80,80,0.25)');
+      path.setAttribute('stroke', state === 'ok' ? '#2e7dd7' : '#c23b3b');
       draw();
     },
     hide() { current = null; draw(); },
