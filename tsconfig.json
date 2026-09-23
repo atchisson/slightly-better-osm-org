@@ -8,6 +8,8 @@
     "noUncheckedIndexedAccess": true,
     "noEmit": true,
     "skipLibCheck": true,
+    "allowJs": true,
+    "checkJs": true,
     "types": ["vitest/globals"]
   },
   "include": ["src", "tests", "esbuild.config.mjs"]
