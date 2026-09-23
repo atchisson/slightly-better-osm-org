@@ -91,7 +91,9 @@ Le principe : **tout ce qui est fragile tient dans un module**, le reste est pur
 
 ### `bridge/` — la seule couche qui connaît les entrailles de iD
 
-Sur osm.org, iD n'est plus dans une iframe : il se monte dans `<div id="id-container">` de la page. Mais le contexte n'est pas exposé — `app/assets/javascripts/id.js` fait `const idContext = iD.coreContext()`, en portée locale. Seul `window.iD`, le namespace de la bibliothèque, est global.
+Sur osm.org, iD n'est plus dans une iframe, avait conclu la lecture du code de rails (`id.html.erb`, `<div id="id-container">`) : il se monterait directement dans la page. Le contexte n'est de toute façon pas exposé — `app/assets/javascripts/id.js` fait `const idContext = iD.coreContext()`, en portée locale. Seul `window.iD`, le namespace de la bibliothèque, est global.
+
+> **Corrigé le 2026-09-23, par le spike (`docs/superpowers/spikes/2026-09-22-capture-contexte-id.md`).** **C'était faux : iD est bien dans une iframe, servie à `/id`.** Le script s'injecte d'abord sur `/edit`, puis à nouveau sur `/id`, où vit réellement l'éditeur — c'est ce document-là, et non le document parent, que le bridge, le bouton et le calque de survol doivent cibler ; une commande tapée dans la console du document parent ne capture jamais rien, il faut basculer le sélecteur de cadre. C'est exactement pour vérifier l'hypothèse dont dépend tout le bridge — qu'on puisse intercepter `window.iD` avant le bootstrap et capturer l'instance de `coreContext()` — que le spike a été mené : la seule lecture du code de rails y avait fait conclure à l'inverse de ce qu'une vraie session de navigateur a montré.
 
 Le bridge s'exécute donc en `document-start`, pose un `Object.defineProperty` sur `window.iD` pour intercepter l'affectation du namespace, enveloppe `coreContext` et capture l'instance au moment où `id.js` l'appelle.
 
