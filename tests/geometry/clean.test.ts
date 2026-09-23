@@ -48,8 +48,23 @@ describe('simplify', () => {
     expect(simplify(r, 0.2)).toHaveLength(r.length);
   });
 
-  it('ne descend jamais sous un triangle', () => {
+  it('un triangle est renvoyé tel quel sans entrer dans la récursion', () => {
+    // open.length === 3 : simplify sort par le retour anticipé du haut
+    // (`if (open.length <= 3) return ring;`), avant tout appel à recurse().
     const r = ferme([[0, 0], [0.000001, 0], [0.0000005, 0.0000005]]);
     expect(simplify(r, 100).length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('la récursion elle-même ne redescend jamais sous un triangle', () => {
+    // 4 sommets exactement alignés sur une même droite. Le sommet le plus
+    // éloigné du premier est aussi le dernier (far === open.length - 1), et
+    // les deux sommets intermédiaires sont à distance nulle de la corde
+    // (0)-(3) puisqu'ils sont sur cette droite : aucun n'est jamais ajouté à
+    // `keep`, qui reste { 0, 3 } — 2 éléments. La récursion s'exécute donc
+    // pour de vrai (open.length === 4 > 3, on dépasse le retour anticipé du
+    // haut), mais c'est le garde-fou du bas (`if (kept.length < 3) return
+    // ring;`) qui renvoie l'anneau initial inchangé.
+    const r = ferme([[0, 0], [0.000001, 0.000001], [0.000002, 0.000002], [0.0001, 0.0001]]);
+    expect(simplify(r)).toEqual(r);
   });
 });
