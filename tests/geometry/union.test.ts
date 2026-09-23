@@ -76,4 +76,12 @@ describe('topologicalUnion', () => {
   it('refuse un ensemble vide', () => {
     expect(topologicalUnion([])).toEqual({ ok: false, reason: 'vide' });
   });
+
+  it('refuse un ensemble non vide dont toutes les arêtes s’annulent', () => {
+    // Un polygone et son doublon exact : chaque arête est comptée deux fois et
+    // disparaît entièrement, laissant une adjacence vide — pas de sommet de
+    // départ pour reduce(). Ce cas ne passe jamais par le garde `polys.length === 0`.
+    const u = topologicalUnion([rect(0, 0, 0, 1, 1), rect(1, 0, 0, 1, 1)]);
+    expect(u).toEqual({ ok: false, reason: 'vide' });
+  });
 });

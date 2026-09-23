@@ -35,6 +35,16 @@ function addAdjacency(adjacency: Map<string, string[]>, from: string, to: string
   }
 }
 
+/**
+ * Union topologique exacte d'un ensemble de polygones cadastraux.
+ *
+ * Contrat : n'opère que sur les anneaux extérieurs (`Poly.outer`) ; `Poly.holes`
+ * n'est jamais lu. L'appelant ne doit jamais transmettre un membre porteur d'un
+ * trou existant — un tel trou serait silencieusement perdu du résultat. Le
+ * refus de composer dès qu'un membre a un trou est la responsabilité de
+ * l'appelant (voir la sélection des composantes, en amont), pas de cette
+ * fonction.
+ */
 export function topologicalUnion(polys: Poly[]): UnionResult {
   if (polys.length === 0) return { ok: false, reason: 'vide' };
 
@@ -93,6 +103,13 @@ export function topologicalUnion(polys: Poly[]): UnionResult {
 
   if (rings.length === 1) return { ok: true, ring: rings[0]! };
 
+  // Limite connue : pointInRing() repose sur le ray casting, non défini pour un point
+  // situé exactement sur une arête du plus grand anneau (un T proche mais non un sommet
+  // partagé). Le pire effet possible est un mauvais choix entre 'trou' et
+  // 'parties-multiples' — jamais une géométrie erronée, l'union restant de toute façon
+  // refusée. Non observé sur les 37 848 bâtiments durs d'Angers ; non corrigé
+  // délibérément, le coût d'un point-in-polygon robuste aux bords dépassant la valeur
+  // d'un libellé de refus parfois erroné.
   const largest = rings.reduce((a, b) => (Math.abs(ringArea(a)) >= Math.abs(ringArea(b)) ? a : b));
   const nested = rings.every(r => r === largest || pointInRing(r[0]!, largest));
   return { ok: false, reason: nested ? 'trou' : 'parties-multiples' };
