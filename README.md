@@ -15,7 +15,11 @@ main.
 - **Aucune modification d'un objet OSM existant, en v1.** Sur un mur mitoyen, le
   greffon réutilise des nœuds OSM déjà présents — il ne les crée jamais en double —
   mais il les réutilise **en place, sans jamais les déplacer**, et ne touche donc à
-  aucune géométrie préexistante. Ce n'est pas un cas rare : 70,3 % des bâtiments en
+  aucune géométrie préexistante. Seuls sont réutilisables les sommets d'un bâtiment OSM
+  (way taguée `building`, ou membre d'une relation `building`) et les nœuds nus
+  n'appartenant à aucune autre way : un nœud porteur de tags — une adresse, un arbre,
+  du mobilier urbain — et un sommet de voirie sont écartés, pour ne jamais leur faire
+  porter un coin de maison ni raccrocher un bâtiment à une route. Ce n'est pas un cas rare : 70,3 % des bâtiments en
   dur du cadastre (mesuré sur Angers) sont mitoyens d'un autre bâtiment en dur, donc
   la mitoyenneté est la norme, pas l'exception — sans cette réutilisation, la plupart
   des créations dupliqueraient un mur déjà tracé.
@@ -193,6 +197,7 @@ construite, dans chacun des cas suivants (chacun avec son propre message) :
 | Bâtiment OSM déjà présent à l'endroit cliqué | non mesuré à l'échelle d'une commune |
 | Commune introuvable ou hors couverture du cadastre français | — |
 | Réseau coupé / données cadastre indisponibles | — |
+| Clic pendant le chargement des données d'une commune (rien n'est créé sans qu'un contour ait été montré au survol) | — |
 | Contexte iD non capturé au démarrage (voir plus bas) | — |
 
 Au total, sur les 37 848 bâtiments en dur d'Angers pris comme ancre, la composition
@@ -291,7 +296,7 @@ création qui les référence.
 
 ```bash
 npm install
-npm test        # 186 tests, 18 fichiers, à la date de cette version
+npm test        # 237 tests, 19 fichiers, à la date de cette version
 npm run typecheck
 npm run build
 ```

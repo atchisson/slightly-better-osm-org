@@ -178,12 +178,13 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
     //
     // Revue (deuxième passe) : avant ce correctif, cette fonction retournait
     // immédiatement dès que `dataset` existait, MÊME si `loading` pointait vers un
-    // rechargement en cours pour une AUTRE commune — un clic pendant ce court
-    // intervalle composait contre l'ancien dataset et échouait en silence avec
-    // « aucun bâtiment », reproduisant le symptôme du défaut initial, en transitoire
-    // au lieu de permanent. Vérifier `loading` en premier, systématiquement, corrige
-    // les deux chemins (le premier chargement et clickAt pendant un rechargement) avec
-    // une seule garde.
+    // rechargement en cours pour une AUTRE commune.
+    //
+    // Revue finale : clickAt ne passe plus par ici pour attendre — il refuse tout court
+    // quand un chargement est en vol (I3, « jamais de création à l'aveugle »). Les
+    // appelants restants sont `enable()` et le clic qui RELANCE un chargement après un
+    // échec ; la garde reste juste pour eux : ne jamais lancer un second chargement
+    // par-dessus un chargement déjà en vol.
     while (loading !== null) await loading;
     if (dataset) return;
     await startLoad(pt, d => { dataset = d; });

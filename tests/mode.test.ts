@@ -205,8 +205,8 @@ describe('mode cadastre', () => {
   // --- Le survol et le clic ne doivent jamais diverger SUR LA COMPOSITION ---
   //
   // Revue : ce test s'appelait « composent exactement le même contour » et comparait
-  // le ring dessiné au survol au ring transmis à createBuilding. Mais dans TOUT ce
-  // fichier, bridge.nodesNear renvoie toujours [] : snapToExistingNodes n'a donc jamais
+  // le ring dessiné au survol au ring transmis à createBuilding. Mais le double de
+  // bridge de ce bloc rend toujours [] depuis nodesIn : snapToExistingNodes n'a donc jamais
   // aucun candidat et ne change structurellement rien. Ce test ne pouvait prouver que
   // « compose() est cohérent avec lui-même » (hoverAt et clickAt appellent la même
   // fonction fermée sur le même dataset) — jamais que le recalage aux nœuds existants
