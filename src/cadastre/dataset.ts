@@ -10,7 +10,6 @@ export interface Dataset {
   insee: string;
   millesime: string;
   polys: Poly[];
-  edgeIndex: Map<string, number[]>;
   absorption: Map<number, number[]>;
   /** id -> polygone ; construit ici, une fois par commune */
   byId: Map<number, Poly>;
@@ -59,6 +58,10 @@ const cellKey = (x: number, y: number): string => `${Math.floor(x / CELL)}:${Mat
 
 export function buildDataset(insee: string, millesime: string, features: unknown[]): Dataset {
   const polys = toPolys(features);
+  // edgeIndex n'est nécessaire que pour calculer les composantes légères : il n'est lu
+  // par aucun code après buildDataset (composeFor le déclarait sans jamais le consulter).
+  // Mesuré à 82,6 Mo sur Angers — 95 % du coût de polys+index — c'est délibérément une
+  // variable locale, jamais un champ de Dataset, pour qu'il soit collecté ici.
   const edgeIndex = buildEdgeIndex(polys);
   const components = lightComponents(polys, edgeIndex);
   const absorption = absorptionMap(components);
@@ -89,7 +92,6 @@ export function buildDataset(insee: string, millesime: string, features: unknown
     insee,
     millesime,
     polys,
-    edgeIndex,
     absorption,
     byId,
     lightIndex,

@@ -11,7 +11,10 @@ const rect = (id: number, type: Poly['type'], x0: number, y0: number, x1: number
 
 // byId et lightIndex sont, en production, construits une fois par commune (voir la revue
 // de tâche 8) — ici on les recalcule à chaque prepare() par simplicité de test, ce qui
-// reste largement acceptable au vu de la taille des fixtures.
+// reste largement acceptable au vu de la taille des fixtures. edgeIndex ne sert qu'à
+// calculer les composantes légères (lightComponents) : ComposeInput ne le porte plus
+// (mesure Task 12 — 82,6 Mo sur Angers, lu par aucun code après ce calcul), donc il
+// reste une variable locale ici aussi, jamais renvoyée.
 const prepare = (polys: Poly[]): ComposeInput => {
   const edgeIndex = buildEdgeIndex(polys);
   const components = lightComponents(polys, edgeIndex);
@@ -21,7 +24,6 @@ const prepare = (polys: Poly[]): ComposeInput => {
   }
   return {
     polys,
-    edgeIndex,
     absorption: absorptionMap(components),
     byId: new Map(polys.map(p => [p.id, p])),
     lightIndex,

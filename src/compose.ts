@@ -4,7 +4,6 @@ import type { LonLat, Poly, Ring } from './geometry/types';
 
 export interface ComposeInput {
   polys: Poly[];
-  edgeIndex: Map<string, number[]>;
   absorption: Map<number, number[]>;
   /** id -> polygone ; construit une fois par commune, jamais par appel */
   byId: Map<number, Poly>;
