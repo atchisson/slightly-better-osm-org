@@ -63,7 +63,23 @@ Faits mesurés qui pilotent la conception :
 
 Un fichier commune est téléchargé une fois, puis conservé en IndexedDB avec son millésime et sa date de récupération. Rechargement quand la carte change de commune.
 
-À l'ingestion, les polygones ne sont pas conservés sous forme d'objets GeoJSON parsés — trop coûteux en mémoire à 50 000 entités — mais réduits à une forme compacte (bbox, anneau en `Float64Array`, type) et indexés spatialement.
+Les polygones sont indexés dans une grille spatiale à l'ingestion.
+
+> **Corrigé le 2026-09-23, par la mesure.** Cette section prescrivait une forme compacte — bbox et anneaux en `Float64Array` — au motif que 50 000 géométries parsées coûteraient trop cher. **C'était faux.** Ventilation réelle de ce que retenait le jeu de données d'Angers avant correction :
+>
+> | Structure | Retenu |
+> |---|---|
+> | Index des arêtes | **82,6 Mo** |
+> | Grille spatiale | 19,7 Mo |
+> | Coordonnées référencées depuis le JSON parsé | 39,6 Mo |
+> | `Poly[]` lui-même | 4,7 Mo |
+> | `byId` + `lightIndex` + `absorption` | 4,5 Mo |
+>
+> La forme compacte visait les 4,7 Mo. Le vrai coût était un index des arêtes **que plus aucun code ne lisait** après la construction des composantes : il figurait dans deux interfaces et était conservé pour rien. Son retrait fait tomber la rétention de 147,1 à 63,8 Mo, sans rien changer d'autre.
+>
+> Ce que ça coûterait de ne pas mesurer : un refactor de tous les modules géométriques pour gagner trois pour cent, l'essentiel du problème restant en place.
+
+**Rétention résiduelle, assumée.** À 63,8 Mo pour Angers, une commune comme Marseille — dont les seize arrondissements pèsent 4,6 fois plus — se situerait autour de 293 Mo. C'est lourd mais ce n'est pas dangereux : il s'agit de données longues à vivre, pas de churn d'allocation, donc sans effet sur les temps de frame. La mitigation existe si elle devient nécessaire — ne retenir que les polygones proches de la vue et recharger au déplacement — mais elle complique le cycle de vie du cache, et rien ne justifie de la payer avant d'avoir constaté une gêne. Voir §12.
 
 ## 4. Architecture
 
@@ -235,3 +251,4 @@ Par ordre : le premier point est bloquant, et conditionne tout le projet.
 - Remplacement de géométrie sur un bâtiment OSM existant, en préservant identifiant, historique, tags et appartenances aux relations.
 - Géométries à trou et multipolygones.
 - Éventuellement un mode zone, qui impliquerait alors une vraie conflation automatique et les obligations complètes du régime d'import.
+- **Rétention par emprise visible**, si la mémoire devient gênante sur les grandes communes. Mesuré : 63,8 Mo retenus pour Angers, environ 293 Mo extrapolés pour Marseille. Les coordonnées seules y pèseraient 182 Mo, donc aucun jeu d'index ne suffira — seule une rétention partielle changerait l'ordre de grandeur. À ne faire que si quelqu'un constate la gêne : le cycle de vie du cache s'en trouve nettement compliqué, et un rechargement au déplacement introduit une latence là où il n'y en a aujourd'hui aucune.
