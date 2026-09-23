@@ -139,7 +139,7 @@ Ce choix a été fait en connaissance du risque : 16 % des constructions légèr
 3. Absorber toutes les composantes légères dont le propriétaire est l'ancre.
 4. Union géométrique de l'ancre et des composantes absorbées.
 5. Si l'union produit un trou ou plusieurs parties : refus, avec message.
-6. Supprimer les sommets colinéaires apparus aux coutures, puis simplifier (Douglas-Peucker, coefficient réglable, défaut à caler pendant l'implémentation).
+6. Supprimer les sommets colinéaires apparus aux coutures, puis simplifier (Douglas-Peucker, coefficient réglable, défaut à caler pendant l'implémentation). **Les deux passes doivent borner leur erreur** : tout sommet supprimé reste à moins de la tolérance du contour retenu. C'est une garantie que seul un algorithme global comme Douglas-Peucker apporte ; un test de proximité local, appliqué en cascade, laisse l'erreur se composer. Mesuré le 2026-09-23 : une première implémentation locale déplaçait des contours réels jusqu'à 7,27 m avec une tolérance de 2 cm.
 7. Contrôle de recouvrement avec les bâtiments OSM existants : refus si recouvrement.
 8. Recaler chaque sommet sur un nœud OSM existant s'il s'en trouve un à portée.
 9. Créer les nœuds manquants et la way, en une seule opération annulable. Sélectionner le résultat.

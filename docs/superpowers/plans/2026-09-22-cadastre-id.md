@@ -1169,6 +1169,14 @@ export function simplify(ring: Ring, toleranceM?: number): Ring;        // Dougl
 
 **Choix des valeurs par défaut.** `dropCollinear` à 2 cm supprime les sommets réellement alignés, apparus aux coutures, sans toucher à un vrai décrochement. `simplify` à 20 cm reste bien en deçà de la précision du cadastre. Les deux sont réglables ; ces défauts sont à confirmer à l'usage (spec §10.6).
 
+> **Correction post-revue (2026-09-23) — défaut sérieux.** L'implémentation de `dropCollinear` donnée au Step 3 est **fausse**, et le code livré en diffère. Elle compare chaque sommet au segment joignant ses voisins, mais prend comme voisin précédent le dernier sommet *conservé* et comme suivant le sommet *original* : la ligne de référence dérive donc à mesure que des sommets disparaissent, et l'erreur se compose au lieu de rester bornée par la tolérance.
+>
+> Ce n'est pas théorique. Exécutée sur les 50 989 anneaux réels d'Angers, cette version modifie 44,5 % des anneaux et déplace le contour de **727 cm au maximum**, avec 22 anneaux au-delà de 20 cm — donc au-delà de ce que la simplification en aval s'autorise, qui ne les masque pas. Une fonction à tolérance 2 cm déplaçait des bâtiments de sept mètres.
+>
+> Le code livré délègue à la même routine Douglas-Peucker que `simplify`, avec sa propre tolérance. Douglas-Peucker garantit **par construction** ce que le test local ne pouvait pas : tout sommet supprimé reste à moins de la tolérance du contour retenu. Les deux fonctions exportées, leurs signatures et leurs tolérances restent distinctes — elles servent des usages distincts, `dropCollinear` tournant même si la simplification est désactivée.
+>
+> Leçon pour le reste du plan : un test de proximité local ne borne pas l'erreur globale d'une suppression en cascade. Partout où le plan supprime des points par un critère local, la même question se pose.
+
 - [ ] **Step 1: Écrire les tests**
 
 `tests/geometry/clean.test.ts` :
