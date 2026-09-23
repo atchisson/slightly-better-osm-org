@@ -245,7 +245,8 @@ Expected: FAIL — `vitest` n'est pas installé, ou `Cannot find module '../src/
     "esbuild": "^0.25.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0",
-    "fake-indexeddb": "^6.0.0"
+    "fake-indexeddb": "^6.0.0",
+    "jsdom": "^26.0.0"
   }
 }
 ```
@@ -286,9 +287,10 @@ export default defineConfig({
 });
 ```
 
-`.gitignore` :
+`.gitignore` — le fichier existe déjà et contient `.superpowers/` (espace de travail du processus d'exécution). **Compléter, ne pas écraser** :
 
 ```
+.superpowers/
 node_modules/
 dist/
 spike/
@@ -555,8 +557,9 @@ export interface Poly { id: number; type: BatType; outer: Ring; holes: Ring[]; }
 export function edgeKey(a: LonLat, b: LonLat): string;
 export function segmentLength(a: LonLat, b: LonLat): number;   // mètres
 export function buildEdgeIndex(polys: Poly[]): Map<string, number[]>;  // clé -> ids
-export function sharedLength(a: Poly, b: Poly): number;        // mètres
 ```
+
+L'accumulation des longueurs de frontière se fait dans `lightComponents` (Task 5), à partir de l'index : une composante légère borde plusieurs durs, ce qui n'est pas une relation entre deux polygones. Pas de helper `sharedLength` ici — il n'aurait aucun appelant.
 
 - [ ] **Step 1: Écrire les tests**
 
@@ -564,7 +567,7 @@ export function sharedLength(a: Poly, b: Poly): number;        // mètres
 
 ```ts
 import { describe, it, expect } from 'vitest';
-import { edgeKey, segmentLength, buildEdgeIndex, sharedLength } from '../../src/geometry/edges';
+import { edgeKey, segmentLength, buildEdgeIndex } from '../../src/geometry/edges';
 import type { Poly } from '../../src/geometry/types';
 
 const carre = (id: number, x0: number, y0: number, type: Poly['type'] = '01'): Poly => ({
@@ -607,21 +610,11 @@ describe('buildEdgeIndex', () => {
     const idx = buildEdgeIndex([carre(0, 0, 0)]);
     for (const owners of idx.values()) expect(owners).toHaveLength(1);
   });
-});
 
-describe('sharedLength', () => {
-  it('vaut zéro pour deux polygones disjoints', () => {
-    expect(sharedLength(carre(0, 0, 0), carre(1, 10, 10))).toBe(0);
-  });
-
-  it('vaut la longueur du côté commun pour deux carrés accolés', () => {
-    const attendu = segmentLength([0.001, 0], [0.001, 0.001]);
-    expect(sharedLength(carre(0, 0, 0), carre(1, 0.001, 0))).toBeCloseTo(attendu, 6);
-  });
-
-  it('ignore un contact ponctuel', () => {
-    // carrés se touchant par un seul coin
-    expect(sharedLength(carre(0, 0, 0), carre(1, 0.001, 0.001))).toBe(0);
+  it('n’associe pas deux polygones qui ne se touchent que par un coin', () => {
+    // un contact ponctuel ne partage aucune arête : chaque clé garde un seul propriétaire
+    const idx = buildEdgeIndex([carre(0, 0, 0), carre(1, 0.001, 0.001)]);
+    for (const owners of idx.values()) expect(owners).toHaveLength(1);
   });
 });
 ```
@@ -674,19 +667,12 @@ export function buildEdgeIndex(polys: Poly[]): Map<string, number[]> {
   return index;
 }
 
-export function sharedLength(a: Poly, b: Poly): number {
-  const chezB = new Set<string>();
-  for (const [p, q] of edges(b)) chezB.add(edgeKey(p, q));
-  let total = 0;
-  for (const [p, q] of edges(a)) if (chezB.has(edgeKey(p, q))) total += segmentLength(p, q);
-  return total;
-}
 ```
 
 - [ ] **Step 4: Lancer les tests pour les voir passer**
 
 Run: `npx vitest run tests/geometry/edges.test.ts`
-Expected: PASS, 9 tests.
+Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1860,7 +1846,25 @@ describe('downloadCommune', () => {
 
   it('signale une commune absente du jeu', async () => {
     const fetchFn = vi.fn().mockResolvedValue({ ok: false, status: 404, url: '' }) as unknown as typeof fetch;
-    await expect(downloadCommune('75056', fetchFn)).rejects.toThrow(/404/);
+    await expect(downloadCommune('49999', fetchFn)).rejects.toThrow(/404/);
+  });
+
+  it('recolle les vingt arrondissements pour Paris', async () => {
+    const body = await gzip(JSON.stringify({ features: [{ a: 1 }] }));
+    const fetchFn = vi.fn().mockImplementation(async (url: string) => ({
+      ok: true,
+      url: url.replace('/latest/', '/2026-06-01/'),
+      body: new Blob([body]).stream(),
+    })) as unknown as typeof fetch;
+
+    const r = await downloadCommune('75056', fetchFn);
+    expect(fetchFn).toHaveBeenCalledTimes(20);
+    expect(r.features).toHaveLength(20);
+    expect(r.millesime).toBe('2026');
+    // c'est bien le code arrondissement qui est demandé, jamais 75056
+    for (const [url] of (fetchFn as unknown as { mock: { calls: string[][] } }).mock.calls) {
+      expect(url).not.toContain('75056');
+    }
   });
 });
 ```
@@ -1873,7 +1877,7 @@ Expected: FAIL — module introuvable.
 - [ ] **Step 3: Implémenter `download.ts`**
 
 ```ts
-import { departementOf } from './insee';
+import { arrondissementCodes, departementOf } from './insee';
 
 const BASE = 'https://cadastre.data.gouv.fr/data/etalab-cadastre/latest/geojson/communes';
 
@@ -1888,9 +1892,9 @@ export function millesimeFromUrl(url: string): string {
   return m[1]!;
 }
 
-export async function downloadCommune(
+async function downloadOne(
   insee: string,
-  fetchFn: typeof fetch = fetch,
+  fetchFn: typeof fetch,
 ): Promise<{ features: unknown[]; millesime: string }> {
   const res = await fetchFn(datasetUrl(insee));
   if (!res.ok) throw new Error(`cadastre.data.gouv.fr a répondu ${res.status} pour ${insee}`);
@@ -1905,12 +1909,28 @@ export async function downloadCommune(
     millesime: millesimeFromUrl(res.url),
   };
 }
+
+export async function downloadCommune(
+  insee: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<{ features: unknown[]; millesime: string }> {
+  // Paris, Lyon et Marseille n'existent pas sous leur code commune dans le jeu Etalab :
+  // les données sont découpées par arrondissement, et il faut donc les recoller.
+  const codes = arrondissementCodes(insee);
+  if (codes.length === 1) return downloadOne(insee, fetchFn);
+
+  const parts = await Promise.all(codes.map(code => downloadOne(code, fetchFn)));
+  return {
+    features: parts.flatMap(part => part.features),
+    millesime: parts[0]!.millesime,
+  };
+}
 ```
 
 - [ ] **Step 4: Lancer les tests pour les voir passer**
 
 Run: `npx vitest run tests/cadastre/download.test.ts`
-Expected: PASS, 5 tests.
+Expected: PASS, 7 tests.
 
 - [ ] **Step 5: Écrire les tests de cache**
 
