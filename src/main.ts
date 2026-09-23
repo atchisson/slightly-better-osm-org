@@ -18,7 +18,14 @@ void (async () => {
   const container = bridge.containerNode();
   const mode = createMode(bridge, { notify: m => window.alert(m) });
 
-  const surface = (container.querySelector('svg.surface') ?? container) as HTMLElement | SVGElement;
+  // `bridge.surfaceNode()` et rien d'autre : l'élément dont le coin EST l'origine de
+  // `bridge.project()`. Ce fichier faisait auparavant
+  // `container.querySelector('svg.surface') ?? container` — un sélecteur interne d'iD
+  // hors de `src/bridge/` (contre le §4 de la spec), avec un repli MUET qui changeait
+  // l'origine des coordonnées sans rien dire. La connaissance est maintenant dans le
+  // bridge, qui dit son repli en console, et l'overlay lit la même source : il ne peut
+  // plus y avoir deux origines qui divergent.
+  const surface = bridge.surfaceNode();
 
   // offsetX/offsetY sont relatifs à e.target, pas forcément à `surface` : dans un SVG,
   // e.target est souvent un élément descendant (un <path>, un <g>...) dont l'origine

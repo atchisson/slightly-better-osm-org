@@ -43,7 +43,24 @@ export function createOverlay(bridge: IdBridge): Overlay {
   path.setAttribute('stroke-width', '2');
   svg.appendChild(path);
 
-  bridge.containerNode().appendChild(svg);
+  // Attaché à `surfaceNode()` — l'élément dont le coin EST l'origine de `project()` —
+  // et jamais au conteneur d'iD, qui inclut la barre d'outils et le panneau latéral.
+  // C'était le défaut : le calque dessinait des coordonnées projetées depuis l'origine
+  // de la surface dans un SVG calé, lui, sur l'origine du conteneur. Le décalage vaut la
+  // largeur du panneau latéral — qui s'ouvre précisément après chaque création, puisque
+  // le bridge appelle `modeSelect`. Un aperçu décalé est pire qu'un aperçu absent : il a
+  // l'air de fonctionner.
+  //
+  // Quand `surfaceNode()` est le `<svg class="surface">` d'iD, notre `<svg>` y devient
+  // un viewport imbriqué : sans x/y/width/height, il vaut par défaut (0, 0, 100 %,
+  // 100 %) du viewport parent, donc son système de coordonnées utilisateur coïncide
+  // EXACTEMENT avec celui de la projection — par construction, sans dépendre d'aucune
+  // règle CSS. Le `position:absolute;inset:0` ci-dessus ne sert que dans le cas de
+  // repli, où `surfaceNode()` rend un élément HTML ; il est sans effet (et sans nuisance)
+  // à l'intérieur d'un SVG. On reste pour autant hors du pipeline de rendu d'iD : notre
+  // `<svg>` n'a aucune des classes que les jointures de données d'iD sélectionnent, et
+  // il n'est jamais inséré dans un de ses calques.
+  bridge.surfaceNode().appendChild(svg);
 
   // `current` est l'anneau géographique montré ; il est reprojeté à chaque déplacement
   // de carte (draw), jamais mémorisé en coordonnées écran — sinon un pan ou un zoom

@@ -542,3 +542,43 @@ describe('nodesIn — éligibilité des nœuds au recalage', () => {
     expect(bridge.nodesIn(partout).map(n => n.id)).toEqual(['n_dedans']);
   });
 });
+
+describe('surfaceNode — une seule origine de projection', () => {
+  // I1 : `src/main.ts` faisait `container.querySelector('svg.surface') ?? container` —
+  // un sélecteur interne d'iD HORS de src/bridge/ (contre le §4 de la spec), avec un
+  // repli MUET qui changeait l'origine des coordonnées sans le dire. La connaissance
+  // vit maintenant ici, et le repli se dit en console.
+  const ctxAvecConteneur = (node: unknown) => ({
+    map: () => ({ extent: () => ({ rectangle: () => [0, 0, 1, 1] }), on: () => {}, off: () => {} }),
+    history: () => ({ intersects: () => [] }),
+    graph: () => ({ entity: () => ({ loc: [0, 0] }) }),
+    projection: Object.assign((p: unknown) => p, { invert: (p: unknown) => p }),
+    perform: () => {},
+    enter: () => {},
+    container: () => ({ node: () => node }),
+  });
+
+  it('rend la surface de carte quand elle existe, pas la racine de l’éditeur', () => {
+    const conteneur = document.createElement('div');
+    const surface = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    surface.setAttribute('class', 'surface');
+    conteneur.appendChild(surface);
+
+    expect(makeBridge(ctxAvecConteneur(conteneur)).surfaceNode()).toBe(surface);
+  });
+
+  it('se rabat sur le conteneur EN LE DISANT quand aucune surface n’est trouvée', () => {
+    const espion = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const conteneur = document.createElement('div');
+      const bridge = makeBridge(ctxAvecConteneur(conteneur));
+
+      expect(bridge.surfaceNode()).toBe(conteneur);
+      // Le repli change l'origine des coordonnées : il doit être lisible en console,
+      // pas deviné à l'écran.
+      expect(espion).toHaveBeenCalledWith(expect.stringContaining('surface'));
+    } finally {
+      espion.mockRestore();
+    }
+  });
+});

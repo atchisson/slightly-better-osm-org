@@ -88,6 +88,15 @@ supplémentaire, voir plus bas).
 - [ ] Le survol d'un bâtiment affiche son contour, aligné sur la couche cadastre WMS
       affichée par iD (le calque et le fond de carte doivent se superposer
       visuellement, pas seulement être dans la bonne zone approximative).
+- [ ] **Le contour reste aligné une fois le panneau latéral ouvert** (il s'ouvre après
+      chaque création, puisque le greffon sélectionne l'objet créé) : survoler un
+      bâtiment juste après une création doit dessiner le contour SUR le bâtiment, pas
+      décalé horizontalement de la largeur du panneau. C'est le symptôme d'une origine
+      de projection erronée — le calque et la conversion écran → coordonnées doivent
+      tous deux venir de `surfaceNode()` (voir `src/bridge/capture.ts`). Vérifier aussi
+      qu'aucun message `surface de carte (svg.surface) introuvable` n'apparaît en
+      console : il signale que le repli a été pris, donc que l'alignement n'est plus
+      garanti.
 - [ ] Survoler un porche ou un appentis accolé à une maison fait apparaître le
       contour fusionné de la maison entière, porche compris — pas le porche seul.
 - [ ] Survoler l'un de deux bâtiments en dur manifestement mitoyens (un mur commun,

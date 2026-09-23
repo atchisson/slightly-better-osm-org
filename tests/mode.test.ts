@@ -60,6 +60,7 @@ describe('mode cadastre', () => {
       createBuilding: (ring, tags) => { created.push({ ring, tags }); },
       prefillChangeset: vi.fn(),
       containerNode: () => container,
+      surfaceNode: () => container,
     };
   });
 
@@ -573,6 +574,7 @@ describe('mode cadastre — commune introuvable vs réseau (defaultLoadDataset)'
       createBuilding: () => {},
       prefillChangeset: vi.fn(),
       containerNode: () => container,
+      surfaceNode: () => container,
     };
   });
 
@@ -651,6 +653,7 @@ describe('mode cadastre — réutilisation des nœuds sur un bâtiment de taille
       createBuilding: (_ring, _tags, reused) => { cree.push({ reused }); },
       prefillChangeset: vi.fn(),
       containerNode: () => container,
+      surfaceNode: () => container,
     };
 
     const mode = createMode(bridge, {

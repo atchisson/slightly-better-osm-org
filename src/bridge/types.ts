@@ -27,4 +27,17 @@ export interface IdBridge {
   createBuilding(ring: Ring, tags: Record<string, string>, reused: (string | null)[]): void;
   prefillChangeset(comment: string): void;
   containerNode(): HTMLElement;
+  /**
+   * L'élément dont le coin supérieur gauche **est** l'origine de `project()`.
+   *
+   * Source de vérité unique de la projection. Le conteneur d'iD (`containerNode`) est la
+   * racine de l'éditeur — barre d'outils et panneau latéral compris — et son coin ne
+   * coïncide pas avec celui de la surface de carte : le panneau latéral s'ouvre
+   * justement à chaque création, puisqu'on appelle `modeSelect`. Un consommateur qui
+   * mesurerait la projection contre l'un et dessinerait contre l'autre serait décalé de
+   * plusieurs centaines de pixels — et le calque de survol, seul garde-fou contre une
+   * annexion erronée (spec §5), serait alors pire qu'absent : il aurait l'air de
+   * fonctionner.
+   */
+  surfaceNode(): Element;
 }

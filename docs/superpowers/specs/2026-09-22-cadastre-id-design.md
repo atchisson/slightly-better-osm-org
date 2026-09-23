@@ -102,6 +102,8 @@ buildingsNear(bbox)  -> entités OSM chargées (bâtiments)
 nodesIn(bbox)        -> nœuds OSM existants ÉLIGIBLES dans une étendue
 createBuilding(ring, tags, reusedNodes) -> une opération annulable
 prefillChangeset(comment, source)
+containerNode()      -> racine de l'éditeur (bouton de mode)
+surfaceNode()        -> l'élément dont le coin EST l'origine de project()
 ```
 
 > **Corrigé le 2026-09-23, à la revue de branche.** Cette liste annonçait
@@ -122,6 +124,16 @@ prefillChangeset(comment, source)
 > devenir un sommet du bâtiment créé. `nodesIn` ne rend qu'un nœud sommet d'un bâtiment
 > (way taguée `building`, ou membre d'une relation `building`), ou nu et n'appartenant
 > à aucune autre way.
+>
+> Troisième correction, même revue : `containerNode()` et `surfaceNode()` manquaient à
+> cette liste, et le second n'existait pas du tout. Faute d'une source de vérité unique
+> sur l'origine de la projection, `main.ts` mesurait l'écran contre `svg.surface` (avec
+> un `querySelector` d'iD hors de `bridge/`, et un repli muet sur le conteneur) pendant
+> que le calque de survol se posait sur le conteneur — la racine de l'éditeur, barre
+> d'outils et panneau latéral compris. Les deux ne peuvent pas être justes : le contour
+> aurait été dessiné à des centaines de pixels du bâtiment qu'il décrit, et le panneau
+> latéral s'ouvre justement à chaque création puisqu'on appelle `modeSelect`. Un
+> garde-fou décalé est pire qu'un garde-fou absent — il a l'air de fonctionner.
 
 Aucun autre module ne touche à `iD`. Si iD change son amorçage, on répare ce fichier.
 

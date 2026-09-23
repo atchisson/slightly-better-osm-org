@@ -16,6 +16,7 @@ const fauxBridge = (container: HTMLElement): IdBridge => ({
   createBuilding: () => {},
   prefillChangeset: () => {},
   containerNode: () => container,
+  surfaceNode: () => container,
 });
 
 // Bridge qui capture réellement le callback d'onMapMove (au lieu du no-op ci-dessus) :
@@ -36,6 +37,7 @@ const fauxBridgeAvecDeplacements = (container: HTMLElement) => {
     createBuilding: () => {},
     prefillChangeset: () => {},
     containerNode: () => container,
+    surfaceNode: () => container,
   };
   return {
     bridge,
@@ -133,5 +135,43 @@ describe('overlay', () => {
 
     expect(path.getAttribute('d')).toBe(dApresDestroy);
     expect(path.getAttribute('d')).not.toContain('200 0');
+  });
+});
+
+describe('overlay — origine de la projection', () => {
+  // I1 : le calque dessinait des coordonnées produites par `bridge.project()` (dont
+  // l'origine est le coin de la SURFACE de carte) dans un SVG attaché au CONTENEUR
+  // d'iD — racine de l'éditeur, barre d'outils et panneau latéral compris. Les deux
+  // origines ne peuvent pas coïncider, et le panneau latéral s'ouvre précisément après
+  // chaque création puisque le bridge appelle `modeSelect`. Un aperçu décalé de la
+  // largeur du panneau est pire qu'un aperçu absent : il a l'air de fonctionner, alors
+  // qu'il est le seul garde-fou contre une annexion erronée (spec §5).
+  it('s’attache à surfaceNode(), pas à la racine du conteneur', () => {
+    const conteneur = document.createElement('div');
+    const panneauLateral = document.createElement('div');
+    const surface = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    surface.setAttribute('class', 'surface');
+    conteneur.appendChild(panneauLateral);
+    conteneur.appendChild(surface);
+    document.body.appendChild(conteneur);
+
+    const bridge: IdBridge = {
+      mapExtent: () => [[0, 0], [1, 1]],
+      project: (p) => [p[0] * 100, p[1] * 100],
+      invert: (p) => [p[0] / 100, p[1] / 100],
+      onMapMove: () => () => {},
+      buildingsNear: () => [],
+      nodesIn: () => [],
+      createBuilding: () => {},
+      prefillChangeset: () => {},
+      containerNode: () => conteneur,
+      surfaceNode: () => surface,
+    };
+
+    createOverlay(bridge);
+
+    const svg = conteneur.querySelector('svg.cadastre-id-overlay');
+    expect(svg).not.toBeNull();
+    expect(surface.contains(svg!)).toBe(true);
   });
 });

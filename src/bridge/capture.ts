@@ -358,5 +358,30 @@ function buildBridge(c: any): IdBridge {
     containerNode(): HTMLElement {
       return c.container().node() as HTMLElement;
     },
+
+    surfaceNode(): Element {
+      // C'est ICI, et nulle part ailleurs, que vit la connaissance d'un sélecteur
+      // interne d'iD. Elle était auparavant dans src/main.ts — hors de bridge/, contre
+      // la règle du §4 de la spec — sous la forme
+      // `container.querySelector('svg.surface') ?? container`, dont le repli silencieux
+      // changeait l'origine des coordonnées sans le dire.
+      const container = c.container().node() as HTMLElement;
+      const surface = typeof container?.querySelector === 'function'
+        ? container.querySelector('svg.surface')
+        : null;
+      if (surface) return surface;
+      // Repli explicite, jamais muet : le conteneur inclut la barre d'outils et le
+      // panneau latéral, donc son coin n'est probablement PAS l'origine de la
+      // projection. Tout ce qui en dépend (survol, conversion écran -> coordonnées)
+      // sera décalé, et il faut pouvoir le lire en console plutôt que le deviner à
+      // l'écran.
+      console.log(
+        "[cadastre-id] surface de carte (svg.surface) introuvable dans le conteneur d'iD : " +
+        "repli sur le conteneur lui-meme. L'origine de la projection est probablement " +
+        "decalee (barre d'outils, panneau lateral) ; le calque de survol et la " +
+        "conversion ecran -> coordonnees peuvent ne plus coincider avec la carte.",
+      );
+      return container;
+    },
   };
 }
