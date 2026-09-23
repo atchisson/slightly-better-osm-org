@@ -106,7 +106,12 @@ describe('mode cadastre', () => {
     mode.enable();
     await mode.whenReady();
     await mode.clickAt([0.0005, 0.0005]);
-    expect(bridge.prefillChangeset).toHaveBeenCalledWith(expect.stringContaining('Angers'));
+    expect(bridge.prefillChangeset).toHaveBeenCalledWith(
+      expect.stringContaining('Angers'),
+      // La source aussi, pas seulement le commentaire : le README l'annonce comme
+      // preuve de conformité au code de conduite des éditions automatisées.
+      expect.stringContaining('Mise à jour : 2026'),
+    );
   });
 
   it('pose wall=no sur une construction légère isolée', async () => {

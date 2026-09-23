@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildingTags, changesetComment } from '../../src/tagging/tags';
+import { buildingTags, changesetComment, changesetSource } from '../../src/tagging/tags';
 
 describe('buildingTags', () => {
   it('pose building=yes et la source verbatim avec le millésime', () => {
@@ -40,5 +40,16 @@ describe('changesetComment', () => {
     const c = changesetComment('Angers');
     expect(c).toContain('cadastre');
     expect(c).toContain('Angers');
+  });
+});
+
+describe('changesetSource', () => {
+  it('rend verbatim la même chaîne que le tag source de l’objet', () => {
+    expect(changesetSource('2026'))
+      .toBe(buildingTags({ isolatedLight: false, millesime: '2026' }).source);
+  });
+
+  it('refuse un millésime invalide, comme buildingTags', () => {
+    expect(() => changesetSource('latest')).toThrow(/millésime/i);
   });
 });

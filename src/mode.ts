@@ -7,7 +7,7 @@ import { communeAt } from './cadastre/insee';
 import { overlapsExisting } from './conflation/overlap';
 import { snapToExistingNodes, DEFAULT_SNAP_TOLERANCE_M } from './conflation/snap';
 import { dilatedExtent } from './geometry/edges';
-import { buildingTags, changesetComment } from './tagging/tags';
+import { buildingTags, changesetComment, changesetSource } from './tagging/tags';
 import { createOverlay, type Overlay } from './ui/overlay';
 import { refusalMessage } from './ui/messages';
 import type { IdBridge } from './bridge/types';
@@ -384,7 +384,11 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
         r.ring,
         bridge.nodesIn(dilatedExtent(r.ring, DEFAULT_SNAP_TOLERANCE_M)),
         DEFAULT_SNAP_TOLERANCE_M);
-      const tags = buildingTags({ isolatedLight: r.isolatedLight, millesime: dataset!.millesime });
+      // Capturé AVANT la création : un rechargement de commune peut remplacer `dataset`
+      // pendant l'attente du nom de commune, et l'attribution doit rester celle du jeu
+      // de données qui a réellement produit cette géométrie.
+      const millesime = dataset.millesime;
+      const tags = buildingTags({ isolatedLight: r.isolatedLight, millesime });
 
       bridge.createBuilding(snapped.ring, tags, snapped.reused);
       overlay?.hide();
@@ -395,7 +399,7 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       // coupé entre-temps — le bâtiment, lui, existe. Un échec de résolution du nom ne
       // doit pas davantage faire échouer la promesse de clickAt après coup.
       const nom = await communeName(pt).catch(() => '');
-      bridge.prefillChangeset(changesetComment(nom));
+      bridge.prefillChangeset(changesetComment(nom), changesetSource(millesime));
     },
   };
 }

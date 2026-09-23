@@ -359,11 +359,20 @@ function buildBridge(c: any): IdBridge {
       c.enter(iD.modeSelect(c, [way.id]));
     },
 
-    prefillChangeset(comment: string): void {
+    prefillChangeset(comment: string, source: string): void {
       // `context.storage` n'existe plus (spike du 2026-09-23). iD expose `prefs` sur le
       // namespace, et le commentaire vit dans localStorage sous la clé `comment`, sans
       // préfixe. `commentDate` doit suivre : iD périme un commentaire trop ancien, et
       // l'oublier ferait ignorer le nôtre en silence.
+      //
+      // `source` passe par le MÊME mécanisme. Honnêteté sur le degré de certitude : la
+      // clé `comment` a été lue sur une session réelle par le spike ; la clé `source`,
+      // non — elle est déduite du code d'iD, où l'expiration d'un commentaire trop
+      // ancien efface ensemble `comment`, `hashtags` et `source`. Le pire cas d'une
+      // clé fausse est un champ non prérempli (l'écriture est inoffensive, et le tag
+      // `source` de l'objet lui-même, lui, est posé par tagging/), pas une donnée
+      // fausse — mais c'est exactement pour ça que la vérification manuelle porte
+      // dessus (docs/verification-manuelle.md).
       const iD = (globalThis as any).iD;
       const write = (k: string, v: string): void => {
         try {
@@ -372,6 +381,7 @@ function buildBridge(c: any): IdBridge {
         } catch { /* le préremplissage est un confort, jamais un bloquant */ }
       };
       write('comment', comment);
+      write('source', source);
       write('commentDate', String(Date.now()));
     },
 

@@ -44,3 +44,13 @@ export function buildingTags(input: TagInput): Record<string, string> {
 export function changesetComment(commune: string): string {
   return `Bâtiments depuis le cadastre (${commune})`;
 }
+
+/**
+ * Champ `source` du changeset : la même chaîne, verbatim, que le tag `source` posé sur
+ * chaque objet. C'est la valeur qu'exige la Licence Ouverte (origine + millésime) et
+ * c'est ce que la spec §7 et le README annoncent — « le commentaire de changeset et le
+ * champ source sont préremplis ».
+ */
+export function changesetSource(millesime: string): string {
+  return SOURCE_PREFIX + requireMillesime(millesime);
+}

@@ -114,6 +114,15 @@ supplémentaire, voir plus bas).
       bâtiment voisin déjà présent — pas d'un nœud tout proche mais distinct.
 - [ ] Le panneau de sauvegarde d'iD (accessible en cliquant sur « Enregistrer ») montre
       le commentaire de changeset déjà prérempli, mentionnant la commune.
+- [ ] **Le champ « source » du même panneau est prérempli** avec
+      `cadastre-dgi-fr source : ... Mise à jour : <millésime>`. À vérifier avec une
+      attention particulière : contrairement à la clé `comment`, lue sur une session
+      réelle pendant le spike, la clé de préférence `source` est **déduite** du code
+      d'iD et n'a jamais été confirmée en navigateur. Si le champ reste vide alors que
+      le commentaire, lui, est bien prérempli, c'est que la clé a changé ou n'a jamais
+      été la bonne : corriger `prefillChangeset` dans `src/bridge/capture.ts`. Le
+      README annonce ce préremplissage sous « Règles de contribution françaises » — il
+      ne doit pas rester une promesse non tenue.
 - [ ] Cliquer sur un bâtiment déjà présent dans OSM (par exemple un bâtiment tracé
       manuellement au préalable) déclenche un refus : pas de création, et un message
       explicite apparaît (boîte de dialogue du navigateur).

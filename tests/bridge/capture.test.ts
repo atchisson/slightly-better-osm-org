@@ -380,6 +380,10 @@ describe('cache de buildingsNear', () => {
 });
 
 describe('prefillChangeset', () => {
+  // La valeur exacte que la Licence Ouverte exige de porter : origine + millésime.
+  const SOURCE =
+    'cadastre-dgi-fr source : Direction Générale des Impôts - Cadastre. Mise à jour : 2026';
+
   // Contexte minimal : seules les primitives exigées par PRIMITIVES comptent ici, le
   // reste du bridge n'est pas exercé par ces tests.
   const ctxMinimal = () => ({
@@ -402,9 +406,14 @@ describe('prefillChangeset', () => {
     (globalThis as any).iD = { prefs: (k: string, v: string) => { ecrits[k] = v; } };
     const bridge = makeBridge(ctxMinimal());
 
-    bridge.prefillChangeset('Bâtiment ajouté depuis le cadastre');
+    bridge.prefillChangeset('Bâtiment ajouté depuis le cadastre', SOURCE);
 
     expect(ecrits['comment']).toBe('Bâtiment ajouté depuis le cadastre');
+    // Le README annonce le préremplissage de la source sous « Règles de contribution
+    // françaises », comme preuve de conformité au code de conduite des éditions
+    // automatisées. La spec §4 déclarait bien prefillChangeset(comment, source) ; le
+    // paramètre avait disparu à l'implémentation, sans arbitrage.
+    expect(ecrits['source']).toBe(SOURCE);
     // iD périme un commentaire trop ancien : oublier commentDate le ferait ignorer en
     // silence (spike du 2026-09-23).
     expect(ecrits['commentDate']).toBeDefined();
@@ -414,9 +423,10 @@ describe('prefillChangeset', () => {
   it('se rabat sur localStorage, sous la clé non préfixée "comment", quand iD.prefs est absent', () => {
     const bridge = makeBridge(ctxMinimal());
 
-    bridge.prefillChangeset('Bâtiment ajouté depuis le cadastre');
+    bridge.prefillChangeset('Bâtiment ajouté depuis le cadastre', SOURCE);
 
     expect(localStorage.getItem('comment')).toBe('Bâtiment ajouté depuis le cadastre');
+    expect(localStorage.getItem('source')).toBe(SOURCE);
     expect(localStorage.getItem('commentDate')).not.toBeNull();
     expect(Number(localStorage.getItem('commentDate'))).not.toBeNaN();
   });

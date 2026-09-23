@@ -25,7 +25,16 @@ export interface IdBridge {
    */
   nodesIn(extent: [LonLat, LonLat]): ExistingNode[];
   createBuilding(ring: Ring, tags: Record<string, string>, reused: (string | null)[]): void;
-  prefillChangeset(comment: string): void;
+  /**
+   * Préremplit le commentaire ET le champ source du panneau de sauvegarde d'iD.
+   *
+   * `source` n'est pas décoratif : le README l'annonce sous « Règles de contribution
+   * françaises » comme preuve de conformité au code de conduite des éditions
+   * automatisées, et la Licence Ouverte exige que l'origine et le millésime des données
+   * soient portés. La spec §4 déclarait bien `prefillChangeset(comment, source)` ; le
+   * paramètre avait disparu à l'implémentation, sans arbitrage.
+   */
+  prefillChangeset(comment: string, source: string): void;
   containerNode(): HTMLElement;
   /**
    * L'élément dont le coin supérieur gauche **est** l'origine de `project()`.
