@@ -63,7 +63,10 @@ d'autre que lire et manipuler la page d'édition elle-même.
 - `Ctrl+Z` annule la création (nœuds éventuellement créés + way) en une seule
   opération.
 - Le commentaire de changeset et la source sont préremplis dans le panneau de
-  sauvegarde d'iD ; ils restent modifiables avant l'envoi.
+  sauvegarde d'iD ; ils restent modifiables avant l'envoi. Le préremplissage du champ
+  source passe par les préférences d'iD ; sa clé n'a pas encore été confirmée en
+  session réelle (voir `docs/verification-manuelle.md`) — sans rapport avec le tag
+  `source` posé sur l'objet créé lui-même, indépendant et vérifié par les tests.
 
 ## Attribution des données
 
@@ -121,7 +124,12 @@ intention :
   pas un import.
 - **Le commentaire de changeset et la source sont préremplis**, pour que les
   modifications restent identifiables et attribuables sans effort de la part de la
-  personne qui édite.
+  personne qui édite. Précision honnête : la clé de préférence iD utilisée pour le
+  champ source du changeset a été déduite du code d'iD, pas confirmée en session
+  réelle comme celle du commentaire — une vérification manuelle le couvre (voir
+  `docs/verification-manuelle.md`). Ça ne concerne que ce préremplissage : le tag
+  `source` posé sur l'objet créé, l'obligation de conformité elle-même, est écrit
+  indépendamment et testé.
 - **Aucun objet existant n'est modifié** (voir plus haut) : la réutilisation de nœuds
   ne touche jamais à la way qui les porte déjà.
 
