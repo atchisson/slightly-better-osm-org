@@ -62,6 +62,22 @@ const anyEdgeCrosses = (a: Ring, b: Ring): boolean => {
   return false;
 };
 
+/**
+ * Limite connue et volontairement non corrigée : le recouvrement par chevauchement
+ * exactement colinéaire (deux contours identiques, l'un translaté le long de sa propre
+ * direction, avec par ex. ~40 % de surface réellement en commun) peut échapper à la fois
+ * aux tests de sommet/centre et au croisement strict d'arêtes ci-dessus — cela exige un
+ * alignement d'arêtes exact au flottant près, donc un cas de mesure nulle en pratique
+ * (une perturbation de largeur de 0,1 % ou de rotation de 0,001° suffit à le faire
+ * détecter). Le correctif évident — traiter tout chevauchement colinéaire de longueur
+ * non nulle comme un recouvrement — est plus dangereux que le trou qu'il comblerait : un
+ * mur mitoyen entre deux maisons accolées est exactement deux arêtes colinéaires qui se
+ * chevauchent sur une longueur non nulle, donc cette règle signalerait l'accolement
+ * comme un recouvrement et ferait refuser la plupart des 70,3 % de bâtiments cadastre
+ * durs qui sont mitoyens d'un autre. Distinguer les deux cas exigerait de déterminer de
+ * quel côté de la droite portée chaque anneau se trouve — une vraie pièce de géométrie
+ * pour un cas que même son constat qualifie de mesure nulle.
+ */
 export function overlapsExisting(ring: Ring, existing: ExistingBuilding[]): ExistingBuilding | null {
   for (const candidate of existing) {
     if (disjoint(ring, candidate.ring)) continue;

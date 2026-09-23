@@ -23,6 +23,7 @@ describe('snapToExistingNodes', () => {
     const r = snapToExistingNodes(carre, nodes, 0.2);
     expect(r.ring[0]).toEqual([0.000001, 0]);
     expect(nodes[0]!.loc).toEqual([0.000001, 0]);   // le nœud existant est intact
+    expect(r.ring[0]).not.toBe(nodes[0]!.loc);      // et sans partager sa référence
   });
 
   it('ignore un nœud au-delà de la tolérance', () => {
@@ -36,6 +37,17 @@ describe('snapToExistingNodes', () => {
     const ringProche: Ring = [[0, 0], [0.0000005, 0], [0.001, 0.001], [0, 0.001], [0, 0]];
     const r = snapToExistingNodes(ringProche, nodes, 0.5);
     expect(r.reused.filter(x => x === 'n1')).toHaveLength(1);
+  });
+
+  it('attribue le nœud au sommet le plus proche, pas au premier venu dans l’ordre de l’anneau', () => {
+    // vA (indice 0) est à ~0,13 m du nœud ; vB (indice 1) tombe exactement dessus.
+    // Une attribution gloutonne dans l'ordre de l'anneau donnerait le nœud à vA,
+    // rencontré en premier, au lieu de vB, le seul sommet qui coïncide vraiment.
+    const ring: Ring = [[0, 0], [0.0000012, 0], [0.001, 0.001], [0, 0.001], [0, 0]];
+    const nodes = [{ id: 'n1', loc: [0.0000012, 0] as [number, number] }];
+    const r = snapToExistingNodes(ring, nodes, 0.2);
+    expect(r.reused[1]).toBe('n1');
+    expect(r.reused[0]).toBeNull();
   });
 
   it('garde l’anneau fermé après recalage', () => {
