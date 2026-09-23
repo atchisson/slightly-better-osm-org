@@ -400,6 +400,8 @@ Les tests de géométrie doivent porter sur des cas réels, pas inventés. On ex
 **Interfaces:**
 - Produces: `tests/fixtures/angers.json`, objet dont les clés sont les six cas nommés, chacun `{ label: string, polys: Poly[], anchorId: number }`.
 
+> **Correction post-revue (2026-09-23).** Le test ci-dessous ne vérifie que la validité générique des anneaux : il passerait encore si une ré-extraction perdait le trou de `avecTrou` ou remplaçait la rangée mitoyenne par des bâtiments non adjacents. Or ce fichier est le filet de sécurité des Tasks 5 et 8. La version livrée assortit chaque cas d'une assertion sur la propriété qui le justifie — trou réel, adjacence par arête pour la rangée, la chaîne et le porche, aire strictement positive et inférieure à 1 m² pour le minuscule — au moyen d'un helper d'arête partagée **écrit localement dans le test**. Ne pas l'importer depuis `src/` : le test cesserait alors de détecter une fixture cassée de la même façon que le code de production.
+
 - [ ] **Step 1: Écrire le test qui décrit les fixtures attendues**
 
 `tests/fixtures/angers.test.ts` :
