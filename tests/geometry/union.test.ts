@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { topologicalUnion, ringArea, pointInRing } from '../../src/geometry/union';
+import { topologicalUnion, ringArea, pointInRing, pointInPoly } from '../../src/geometry/union';
 import type { Poly, Ring } from '../../src/geometry/types';
 
 const rect = (id: number, x0: number, y0: number, x1: number, y1: number, type: Poly['type'] = '01'): Poly =>
@@ -15,6 +15,21 @@ describe('pointInRing', () => {
     const r = rect(0, 0, 0, 2, 2).outer;
     expect(pointInRing([1, 1], r)).toBe(true);
     expect(pointInRing([3, 1], r)).toBe(false);
+  });
+});
+
+describe('pointInPoly', () => {
+  it('accepte un point dans l’anneau extérieur quand le polygone n’a pas de trou', () => {
+    expect(pointInPoly([1, 1], rect(0, 0, 0, 2, 2))).toBe(true);
+  });
+
+  it('refuse un point posé dans un trou, même si l’anneau extérieur le contient', () => {
+    const troue: Poly = { ...rect(0, 0, 0, 2, 2), holes: [rect(0, 0.5, 0.5, 1.5, 1.5).outer] };
+    expect(pointInPoly([1, 1], troue)).toBe(false);
+  });
+
+  it('refuse un point hors de l’anneau extérieur, trou ou pas', () => {
+    expect(pointInPoly([3, 3], rect(0, 0, 0, 2, 2))).toBe(false);
   });
 });
 

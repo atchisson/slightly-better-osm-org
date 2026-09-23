@@ -1,5 +1,5 @@
 import { dropCollinear, isDegenerate, simplify } from './geometry/clean';
-import { pointInRing, topologicalUnion } from './geometry/union';
+import { pointInPoly, topologicalUnion } from './geometry/union';
 import type { LonLat, Poly, Ring } from './geometry/types';
 
 export interface ComposeInput {
@@ -26,7 +26,7 @@ const isHard = (p: Poly): boolean => p.type === '01' || p.type === '03';
 
 function hit(pt: LonLat, input: ComposeInput): Poly | null {
   if (input.polyAt) return input.polyAt(pt);
-  for (const p of input.polys) if (pointInRing(pt, p.outer)) return p;
+  for (const p of input.polys) if (pointInPoly(pt, p)) return p;
   return null;
 }
 

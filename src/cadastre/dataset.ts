@@ -1,7 +1,7 @@
 import { buildEdgeIndex } from '../geometry/edges';
 import { absorptionMap, lightComponents } from '../geometry/components';
 import type { LightComponent } from '../geometry/components';
-import { pointInRing } from '../geometry/union';
+import { pointInPoly } from '../geometry/union';
 import type { BatType, LonLat, Poly, Ring } from '../geometry/types';
 
 const CELL = 0.002;   // ~150 m : quelques polygones par case
@@ -98,7 +98,7 @@ export function buildDataset(insee: string, millesime: string, features: unknown
     polyAt(pt: LonLat): Poly | null {
       for (const id of grid.get(cellKey(pt[0], pt[1])) ?? []) {
         const p = polys[id]!;
-        if (pointInRing(pt, p.outer)) return p;
+        if (pointInPoly(pt, p)) return p;
       }
       return null;
     },

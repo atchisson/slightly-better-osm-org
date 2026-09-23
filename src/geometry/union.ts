@@ -26,6 +26,23 @@ export function pointInRing(pt: LonLat, ring: Ring): boolean {
   return inside;
 }
 
+/**
+ * Test d'appartenance complet à un polygone : dans l'anneau extérieur, et hors de
+ * chacun de ses trous. `pointInRing(pt, poly.outer)` seul accepterait un point posé
+ * dans la cour d'un polygone troué, attribuant à tort ce point à l'enveloppe trouée —
+ * revue Task 12 sur données réelles d'Angers : 19 bâtiments sur 29 dont le centre tombe
+ * dans la cour d'un voisin étaient mal attribués par les deux points d'appel du survol
+ * (`Dataset.polyAt` et le balayage linéaire de secours dans `compose.ts`), qui ne
+ * testaient que l'anneau extérieur. Les deux doivent partager ce test : ils sont censés
+ * être interchangeables (`ComposeInput.polyAt` peut être fourni ou, à défaut, remplacé
+ * par ce même balayage).
+ */
+export function pointInPoly(pt: LonLat, poly: Poly): boolean {
+  if (!pointInRing(pt, poly.outer)) return false;
+  for (const hole of poly.holes) if (pointInRing(pt, hole)) return false;
+  return true;
+}
+
 function addAdjacency(adjacency: Map<string, string[]>, from: string, to: string): void {
   const neighbours = adjacency.get(from);
   if (neighbours) {

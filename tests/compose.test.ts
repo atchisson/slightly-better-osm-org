@@ -141,6 +141,42 @@ describe('composeAt', () => {
   });
 });
 
+describe('composeAt — balayage linéaire de secours et une cour (bâtiment dans le trou d’un autre)', () => {
+  // Même défaut, même fixture géométrique que dataset.test.ts, mais sur le balayage
+  // linéaire de secours de hit() (aucun polyAt fourni à prepare()) : les deux chemins de
+  // survol doivent se comporter identiquement, faute de quoi ils dérivent l'un de
+  // l'autre malgré le commentaire de ComposeInput.polyAt qui les dit interchangeables.
+  // Le polygone troué porte l'id 0 (premier de la liste) : le balayage linéaire de hit()
+  // le teste donc en premier, exactement comme la grille de dataset.test.ts.
+  const troue: Poly = {
+    id: 0,
+    type: '01',
+    holes: [[[0.003, 0.003], [0.007, 0.003], [0.007, 0.007], [0.003, 0.007], [0.003, 0.003]]],
+    outer: [[0, 0], [0.01, 0], [0.01, 0.01], [0, 0.01], [0, 0]],
+  };
+  const dansLaCour: Poly = {
+    id: 1,
+    type: '01',
+    holes: [],
+    outer: [[0.0045, 0.0045], [0.0055, 0.0045], [0.0055, 0.0055], [0.0045, 0.0055], [0.0045, 0.0045]],
+  };
+  const centreDuBatimentInterieur: LonLat = [0.005, 0.005];
+  const dansLeTrouMaisHorsBati: LonLat = [0.0035, 0.0035];
+
+  it('résout au bâtiment intérieur (id 1), pas à l’enveloppe trouée, sans index spatial fourni', () => {
+    const input = prepare([troue, dansLaCour]);
+    expect(input.polyAt).toBeUndefined(); // vérifie que c'est bien le balayage linéaire qui est testé
+    const r = composeAt(centreDuBatimentInterieur, input);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.anchorId).toBe(1);
+  });
+
+  it('refuse par “aucun-batiment”, jamais “trou-source”, pour un point dans le trou mais hors de tout bâtiment', () => {
+    const input = prepare([troue, dansLaCour]);
+    expect(composeAt(dansLeTrouMaisHorsBati, input)).toEqual({ ok: false, reason: 'aucun-batiment' });
+  });
+});
+
 describe('composantes légères orphelines (aucun dur adjacent, spec §5 étape 2)', () => {
   it('fusionne une composante orpheline à deux membres, quel que soit le membre cliqué', () => {
     const polys = [

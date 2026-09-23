@@ -71,6 +71,34 @@ describe('buildDataset', () => {
   });
 });
 
+describe('buildDataset — polyAt et une cour (bâtiment dans le trou d’un autre)', () => {
+  // Bâtiment troué (enregistré en premier, donc id 0 — le plus petit) et, dans sa cour,
+  // un second bâtiment sans trou (id 1). Le compartiment de grille qui couvre le centre
+  // du bâtiment intérieur contient les deux id, et buildDataset() les y insère dans
+  // l'ordre de `polys` (ascendant) : le polygone troué est donc bien testé EN PREMIER
+  // par polyAt. Un simple pointInRing(pt, p.outer), qui ignore p.holes, l'accepterait à
+  // tort dès ce premier essai et ne regarderait jamais le bâtiment intérieur — c'est
+  // exactement le défaut mesuré sur les données réelles d'Angers (19 bâtiments sur 29
+  // mal attribués). Ordonner les polygones ainsi (enveloppe d'abord) est ce qui rend ce
+  // test capable d'échouer : un ordre inverse aurait laissé la grille trouver le bon
+  // polygone par simple chance d'itération.
+  const troue = feature('01', carre(0, 0, 0.01), [carre(0.003, 0.003, 0.004)]);
+  const dansLaCour = feature('01', carre(0.0045, 0.0045, 0.001));
+  const centreDuBatimentInterieur: [number, number] = [0.005, 0.005];
+  const dansLeTrouMaisHorsBati: [number, number] = [0.0035, 0.0035];
+
+  it('renvoie le bâtiment intérieur (id 1), pas l’enveloppe trouée (id 0), au centre du bâtiment intérieur', () => {
+    const ds = buildDataset('49007', '2026', [troue, dansLaCour]);
+    expect(ds.polys.map(p => p.id)).toEqual([0, 1]); // vérifie l'hypothèse d'ordre du test
+    expect(ds.polyAt(centreDuBatimentInterieur)?.id).toBe(1);
+  });
+
+  it('renvoie null pour un point dans le trou mais hors de tout bâtiment', () => {
+    const ds = buildDataset('49007', '2026', [troue, dansLaCour]);
+    expect(ds.polyAt(dansLeTrouMaisHorsBati)).toBeNull();
+  });
+});
+
 describe('buildLightIndex — invariant de tri (revue Task 8)', () => {
   // compose.ts:anchorOf résout l'ancre canonique d'une composante orpheline à
   // `members[0]`, en s'appuyant sur le fait que lightComponents() trie déjà `members`
