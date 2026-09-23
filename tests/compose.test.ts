@@ -239,3 +239,65 @@ describe('composantes légères orphelines (aucun dur adjacent, spec §5 étape 
     }
   });
 });
+
+describe('composeFor — sommets partagés avec un bâtiment voisin (spec §5 étape 6)', () => {
+  // Mesuré sur la fixture réelle : le polygone 99 de `rangeeMitoyenne` porte deux
+  // sommets quasi colinéaires, à 1,1 mm et 0,6 mm de leur corde, tous deux partagés
+  // avec un bâtiment voisin du même jeu. `dropCollinear` (2 cm) les supprimait, et
+  // `simplify` (20 cm) à plus forte raison.
+  //
+  // Les deux conséquences étaient silencieuses : le nœud OSM déjà importé du voisin
+  // reste là, mais il n'y a plus de sommet à recaler dessus (le mur mitoyen ne peut
+  // plus être recousu, même une fois C1 corrigé) ; et quand ce voisin sera créé plus
+  // tard par le même outil, SON sommet — non colinéaire sur son propre anneau, donc
+  // conservé — tombera au milieu de notre arête, sans nœud partagé.
+  const polys = fixtures.rangeeMitoyenne.polys as unknown as Poly[];
+  const cle = (p: LonLat): string => `${p[0]},${p[1]}`;
+
+  it('conserve le sommet quasi colinéaire partagé avec le voisin 98', () => {
+    const r = composeFor(99, prepare(polys));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // Ce sommet appartient aussi au polygone 98 : le supprimer découd le mur mitoyen.
+    expect(r.ring.map(cle)).toContain('-0.5643839,47.5034288');
+  });
+
+  it('les deux voisins gardent tous les sommets de leur frontière commune', () => {
+    // La propriété qui compte vraiment, et qui ne dépend pas d'un sommet nommé : tout
+    // sommet appartenant aux DEUX bâtiments doit survivre dans les DEUX contours
+    // composés, sinon leurs murs ne peuvent plus partager de nœud.
+    const input = prepare(polys);
+    const a = composeFor(99, input);
+    const b = composeFor(98, input);
+    expect(a.ok && b.ok).toBe(true);
+    if (!a.ok || !b.ok) return;
+
+    const p99 = new Set(polys.find(p => p.id === 99)!.outer.map(cle));
+    const p98 = new Set(polys.find(p => p.id === 98)!.outer.map(cle));
+    const communs = [...p99].filter(k => p98.has(k));
+    expect(communs.length).toBeGreaterThan(0);
+
+    const dansA = new Set(a.ring.map(cle));
+    const dansB = new Set(b.ring.map(cle));
+    for (const k of communs) {
+      expect(dansA.has(k)).toBe(true);
+      expect(dansB.has(k)).toBe(true);
+    }
+  });
+
+  it('ne protège pas un sommet qui n’appartient qu’au bâtiment composé', () => {
+    // Le nettoyage doit rester un nettoyage : un sommet colinéaire propre à l'anneau,
+    // sans voisin pour le porter, disparaît toujours.
+    const solitaire: Poly[] = [{
+      id: 0, type: '01', holes: [],
+      outer: [
+        [0, 47.5], [0.0005, 47.5], [0.001, 47.5],          // le sommet du milieu est colinéaire
+        [0.001, 47.5007], [0, 47.5007], [0, 47.5],
+      ],
+    }];
+    const r = composeFor(0, prepare(solitaire));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.ring.map(cle)).not.toContain('0.0005,47.5');
+  });
+});

@@ -16,6 +16,12 @@ export interface Dataset {
   /** id d'un léger -> sa composante entière et son propriétaire éventuel */
   lightIndex: Map<number, { ownerId: number | null; members: number[] }>;
   polyAt(pt: LonLat): Poly | null;
+  /**
+   * Polygones dont la case de grille rencontre l'étendue demandée — un sur-ensemble,
+   * jamais un résultat exact. Sert à trouver les VOISINS d'un contour composé sans
+   * balayer la commune entière (compose.ts, protection des sommets partagés).
+   */
+  polysNear(extent: [LonLat, LonLat]): Poly[];
 }
 
 export function toPolys(features: unknown[]): Poly[] {
@@ -101,6 +107,21 @@ export function buildDataset(insee: string, millesime: string, features: unknown
         if (pointInPoly(pt, p)) return p;
       }
       return null;
+    },
+
+    polysNear([[minX, minY], [maxX, maxY]]: [LonLat, LonLat]): Poly[] {
+      const vus = new Set<number>();
+      const out: Poly[] = [];
+      for (let cx = Math.floor(minX / CELL); cx <= Math.floor(maxX / CELL); cx++) {
+        for (let cy = Math.floor(minY / CELL); cy <= Math.floor(maxY / CELL); cy++) {
+          for (const id of grid.get(`${cx}:${cy}`) ?? []) {
+            if (vus.has(id)) continue;
+            vus.add(id);
+            out.push(polys[id]!);
+          }
+        }
+      }
+      return out;
     },
   };
 }

@@ -42,11 +42,15 @@ export function isDegenerate(ring: Ring): boolean {
  * mètres sans jamais la mesurer contre la vraie corde. Voir les tests de
  * régression dans clean.test.ts.
  */
-function douglasPeuckerRing(ring: Ring, toleranceM: number): Ring {
+function douglasPeuckerRing(
+  ring: Ring,
+  toleranceM: number,
+  keepVertex?: (p: LonLat) => boolean,
+): Ring {
   const open = ring.slice(0, -1);
   if (open.length <= 3) return ring;
 
-  const keep = new Set<number>([0]);
+  const keep = new Set<number>();
   const recurse = (first: number, last: number): void => {
     let worst = -1;
     let worstDist = toleranceM;
@@ -59,6 +63,7 @@ function douglasPeuckerRing(ring: Ring, toleranceM: number): Ring {
     recurse(first, worst);
     recurse(worst, last);
   };
+
   // anneau fermé : on le coupe en deux chaînes autour du sommet le plus éloigné du départ
   let far = 1;
   let farDist = -1;
@@ -66,10 +71,19 @@ function douglasPeuckerRing(ring: Ring, toleranceM: number): Ring {
     const d = segmentLength(open[0]!, open[i]!);
     if (d > farDist) { farDist = d; far = i; }
   }
-  keep.add(far);
-  recurse(0, far);
-  recurse(far, open.length - 1);
-  keep.add(open.length - 1);
+
+  // Ancres : les deux extrémités naturelles des chaînes (0, le plus éloigné, le
+  // dernier) PLUS tout sommet déclaré inamovible par l'appelant. Découper en davantage
+  // de chaînes ne peut que réduire l'erreur — la garantie de Douglas-Peucker (aucun
+  // sommet supprimé à plus de `toleranceM` de la ligne brisée conservée) tient donc
+  // toujours, chaîne par chaîne, et donc sur l'anneau entier.
+  const ancres = new Set<number>([0, far, open.length - 1]);
+  if (keepVertex) {
+    for (let i = 0; i < open.length; i++) if (keepVertex(open[i]!)) ancres.add(i);
+  }
+  const bornes = [...ancres].sort((a, b) => a - b);
+  for (const i of bornes) keep.add(i);
+  for (let k = 0; k + 1 < bornes.length; k++) recurse(bornes[k]!, bornes[k + 1]!);
 
   const kept = [...keep].sort((a, b) => a - b).map(i => open[i]!);
   if (kept.length < 3) return ring;
@@ -84,9 +98,17 @@ function douglasPeuckerRing(ring: Ring, toleranceM: number): Ring {
  * construction et doit s'exécuter même si l'appelant désactive la
  * simplification proprement dite ; ne pas les fusionner en une seule
  * fonction sous prétexte qu'elles appellent maintenant la même récursion.
+ *
+ * `keepVertex` déclare des sommets inamovibles : voir la note de
+ * douglasPeuckerRing et src/compose.ts. C'est ce qui empêche de supprimer un
+ * sommet partagé avec un bâtiment voisin, même parfaitement colinéaire.
  */
-export function dropCollinear(ring: Ring, toleranceM = 0.02): Ring {
-  return douglasPeuckerRing(ring, toleranceM);
+export function dropCollinear(
+  ring: Ring,
+  toleranceM = 0.02,
+  keepVertex?: (p: LonLat) => boolean,
+): Ring {
+  return douglasPeuckerRing(ring, toleranceM, keepVertex);
 }
 
 /**
@@ -98,6 +120,10 @@ export function dropCollinear(ring: Ring, toleranceM = 0.02): Ring {
  * nettoyage de couture ; ne pas les fusionner en une seule fonction sous
  * prétexte qu'elles appellent maintenant la même récursion.
  */
-export function simplify(ring: Ring, toleranceM = 0.2): Ring {
-  return douglasPeuckerRing(ring, toleranceM);
+export function simplify(
+  ring: Ring,
+  toleranceM = 0.2,
+  keepVertex?: (p: LonLat) => boolean,
+): Ring {
+  return douglasPeuckerRing(ring, toleranceM, keepVertex);
 }

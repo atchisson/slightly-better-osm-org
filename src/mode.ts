@@ -195,6 +195,7 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       byId: dataset.byId,             // précalculé en Task 12 ; jamais reconstruit par appel
       lightIndex: dataset.lightIndex, // idem : sans lui, anchorOf balaie et les orphelines se tronquent
       polyAt: dataset.polyAt,         // indispensable : le survol balaierait sinon tous les polygones par frame
+      polysNear: dataset.polysNear,   // idem : sans lui, la protection des sommets partagés balaie la commune
       // edgeIndex n'existe plus sur Dataset ni sur ComposeInput (retiré : 82,6 Mo
       // retenus pour rien, cf. cadastre/dataset.ts) — absent ici volontairement.
     });

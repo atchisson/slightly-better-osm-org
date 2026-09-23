@@ -129,3 +129,34 @@ describe('buildLightIndex — invariant de tri (revue Task 8)', () => {
     expect(lightIndex.get(8)!.members).toEqual([3, 5, 8]);
   });
 });
+
+describe('polysNear', () => {
+  // Voisinage indexé : c'est ce qui permet à compose.ts de protéger les sommets
+  // partagés sans balayer les 50 740 polygones de la commune à chaque survol.
+  const feature = (type: string, ring: number[][]) => ({
+    type: 'Feature',
+    geometry: { type: 'MultiPolygon', coordinates: [[ring]] },
+    properties: { type },
+  });
+  const carre = (x0: number, y0: number, d = 0.0002) =>
+    [[x0, y0], [x0 + d, y0], [x0 + d, y0 + d], [x0, y0 + d], [x0, y0]];
+
+  it('rend les polygones dont la case rencontre l’étendue, et pas ceux d’ailleurs', () => {
+    const d = buildDataset('49007', '2026', [
+      feature('01', carre(0, 0)),
+      feature('01', carre(0.0003, 0)),
+      feature('01', carre(5, 5)),
+    ]);
+    const ids = d.polysNear([[0, 0], [0.0005, 0.0005]]).map(p => p.id).sort();
+    expect(ids).toEqual([0, 1]);
+  });
+
+  it('est un sur-ensemble : il ne manque jamais un voisin qui touche l’étendue', () => {
+    const d = buildDataset('49007', '2026', [
+      feature('01', carre(0, 0)),
+      feature('01', carre(0.0002, 0)),   // accolé : partage l'arête x = 0.0002
+    ]);
+    const voisins = d.polysNear([[0, 0], [0.0002, 0.0002]]).map(p => p.id).sort();
+    expect(voisins).toContain(1);
+  });
+});

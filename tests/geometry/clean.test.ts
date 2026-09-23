@@ -147,3 +147,35 @@ describe('simplify', () => {
     expect(simplify(r)).toEqual(r);
   });
 });
+
+describe('sommets inamovibles (keepVertex)', () => {
+  // Utilisé par compose.ts pour protéger les sommets partagés avec un bâtiment voisin.
+  // Ajouter des ancres ne peut que réduire l'erreur : la garantie Douglas-Peucker
+  // (aucun sommet supprimé à plus de la tolérance de la ligne conservée) tient toujours.
+  const avecSommetColineaire: Ring = [
+    [0, 47.5], [0.0005, 47.5], [0.001, 47.5],
+    [0.001, 47.5007], [0, 47.5007], [0, 47.5],
+  ];
+  const cle = (p: number[]) => `${p[0]},${p[1]}`;
+
+  it('supprime le sommet colinéaire quand rien ne le protège', () => {
+    expect(dropCollinear(avecSommetColineaire).map(cle)).not.toContain('0.0005,47.5');
+  });
+
+  it('le garde quand keepVertex le déclare inamovible', () => {
+    const protege = dropCollinear(avecSommetColineaire, 0.02, p => p[0] === 0.0005 && p[1] === 47.5);
+    expect(protege.map(cle)).toContain('0.0005,47.5');
+  });
+
+  it('simplify honore la même protection', () => {
+    const protege = simplify(avecSommetColineaire, 0.2, p => p[0] === 0.0005 && p[1] === 47.5);
+    expect(protege.map(cle)).toContain('0.0005,47.5');
+  });
+
+  it('protéger un sommet ne déplace aucun autre sommet conservé', () => {
+    const sans = dropCollinear(avecSommetColineaire);
+    const avec = dropCollinear(avecSommetColineaire, 0.02, p => p[0] === 0.0005 && p[1] === 47.5);
+    // le contour protégé contient tout ce que le contour non protégé contenait
+    for (const p of sans) expect(avec.map(cle)).toContain(cle(p));
+  });
+});

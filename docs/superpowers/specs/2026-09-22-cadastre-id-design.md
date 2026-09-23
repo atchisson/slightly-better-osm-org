@@ -186,7 +186,29 @@ Ce choix a été fait en connaissance du risque : 16 % des constructions légèr
 3. Absorber toutes les composantes légères dont le propriétaire est l'ancre.
 4. Union géométrique de l'ancre et des composantes absorbées.
 5. Si l'union produit un trou ou plusieurs parties : refus, avec message.
-6. Supprimer les sommets colinéaires apparus aux coutures, puis simplifier (Douglas-Peucker, coefficient réglable, défaut à caler pendant l'implémentation). **Les deux passes doivent borner leur erreur** : tout sommet supprimé reste à moins de la tolérance du contour retenu. C'est une garantie que seul un algorithme global comme Douglas-Peucker apporte ; un test de proximité local, appliqué en cascade, laisse l'erreur se composer. Mesuré le 2026-09-23 : une première implémentation locale déplaçait des contours réels jusqu'à 7,27 m avec une tolérance de 2 cm.
+6. Supprimer les sommets colinéaires apparus aux coutures, puis simplifier (Douglas-Peucker, coefficient réglable, défaut à caler pendant l'implémentation). **Les deux passes doivent borner leur erreur** : tout sommet supprimé reste à moins de la tolérance du contour retenu. C'est une garantie que seul un algorithme global comme Douglas-Peucker apporte ; un test de proximité local, appliqué en cascade, laisse l'erreur se composer. Mesuré le 2026-09-23 : une première implémentation locale déplaçait des contours réels jusqu'à 7,27 m avec une tolérance de 2 cm. **Un sommet partagé avec un polygone cadastre non membre de l'union est inamovible** : les deux passes le conservent, quelle que soit sa colinéarité.
+
+   > **Corrigé le 2026-09-23, à la revue de branche.** Cette étape, telle qu'elle était
+   > écrite, nettoyait sans regarder le voisinage — et c'est de là que venait le défaut,
+   > pas de l'implémentation. Le PCI est topologiquement propre : deux bâtiments mitoyens
+   > partagent des sommets exacts. Or un sommet partagé peut être quasi colinéaire sur
+   > NOTRE anneau sans l'être sur celui du voisin. Mesuré sur la fixture réelle : le
+   > polygone 99 de `rangeeMitoyenne` en porte deux, à 1,1 mm et 0,6 mm de leur corde,
+   > tous deux partagés avec un voisin du même jeu ; `dropCollinear` (2 cm) les
+   > supprimait, `simplify` (20 cm) à plus forte raison.
+   >
+   > Deux conséquences, toutes deux silencieuses. Le nœud OSM déjà importé du voisin est
+   > bien là, mais nous n'avons plus de sommet à recaler dessus : le mur mitoyen ne peut
+   > pas être recousu (étape 8), quand bien même la primitive de recherche de nœuds serait
+   > correcte. Et quand ce voisin sera créé plus tard par ce même outil, **son** sommet —
+   > non colinéaire sur son propre anneau, donc conservé — tombera au milieu de notre
+   > arête, sans nœud partagé : l'artefact d'import que la communauté FR demande
+   > justement d'éviter.
+   >
+   > L'ordre nettoyer (6) puis recaler (8) rend le défaut structurel : il ne peut pas se
+   > rattraper à l'étape 8. La correction est donc à l'étape 6, et l'information
+   > nécessaire y est disponible — ce sont les sommets de l'anneau uni qui appartiennent
+   > aussi à un polygone non membre.
 7. Contrôle de recouvrement avec les bâtiments OSM existants : refus si recouvrement.
 8. Recaler chaque sommet sur un nœud OSM existant **éligible** s'il s'en trouve un à
    portée. Éligible veut dire : sommet d'un bâtiment OSM (way taguée `building`, ou

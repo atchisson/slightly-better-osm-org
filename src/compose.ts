@@ -1,4 +1,5 @@
 import { dropCollinear, isDegenerate, simplify } from './geometry/clean';
+import { dilatedExtent } from './geometry/edges';
 import { pointInPoly, topologicalUnion } from './geometry/union';
 import type { LonLat, Poly, Ring } from './geometry/types';
 
@@ -11,6 +12,12 @@ export interface ComposeInput {
   lightIndex: Map<number, { ownerId: number | null; members: number[] }>;
   /** test d'appartenance indexé ; à défaut, balayage linéaire (acceptable en test seulement) */
   polyAt?: (pt: LonLat) => Poly | null;
+  /**
+   * Voisinage indexé d'une étendue (sur-ensemble) ; à défaut, `polys` entier — acceptable
+   * en test seulement. Sert à protéger les sommets partagés avec un bâtiment voisin, voir
+   * `sommetsPartages`.
+   */
+  polysNear?: (extent: [LonLat, LonLat]) => Poly[];
   simplifyToleranceM?: number;
 }
 
@@ -23,6 +30,54 @@ export type Composition =
   | { ok: false; reason: RefusalReason };
 
 const isHard = (p: Poly): boolean => p.type === '01' || p.type === '03';
+
+const vertexKey = (p: LonLat): string => `${p[0]},${p[1]}`;
+
+/**
+ * Sommets de `ring` qui appartiennent aussi à un polygone cadastre NON membre de
+ * l'union — c'est-à-dire aux bâtiments voisins.
+ *
+ * Pourquoi c'est nécessaire (spec §5 étape 6, corrigée) : le PCI est topologiquement
+ * propre, deux bâtiments mitoyens partagent des sommets exacts. Un de ces sommets
+ * partagés peut être quasi colinéaire SUR NOTRE anneau sans l'être sur celui du voisin —
+ * mesuré sur la fixture réelle d'Angers : le polygone 99 en porte deux, à 1,1 mm et
+ * 0,6 mm de leur corde, tous deux partagés avec un voisin. `dropCollinear` (2 cm), et à
+ * plus forte raison `simplify` (20 cm), les supprimaient. Deux conséquences, toutes deux
+ * silencieuses :
+ *
+ *  - le nœud OSM déjà importé du voisin est là, mais nous n'avons plus de sommet à
+ *    recaler dessus : le mur mitoyen ne peut pas être recousu, même une fois C1 corrigé ;
+ *  - quand ce voisin sera créé plus tard par ce même outil, SON sommet — non colinéaire
+ *    sur son propre anneau, donc conservé — tombera au milieu de notre arête, sans nœud
+ *    partagé. C'est l'artefact d'import classique que la communauté FR demande d'éviter.
+ *
+ * Le nettoyage précédant le recalage (étapes 6 puis 8), le défaut est structurel : il se
+ * corrige au nettoyage, pas au recalage.
+ */
+function sommetsPartages(ring: Ring, membres: Set<number>, input: ComposeInput): Set<string> {
+  // Seuls les sommets DE NOTRE ANNEAU peuvent être protégés : on teste l'appartenance
+  // dans ce sens-là, sur un ensemble d'une dizaine d'éléments, plutôt que d'accumuler
+  // tous les sommets du voisinage.
+  const surAnneau = new Set(ring.slice(0, -1).map(vertexKey));
+  const voisins = input.polysNear
+    ? input.polysNear(dilatedExtent(ring, 0))
+    : input.polys;                       // balayage linéaire : test seulement
+  const partages = new Set<string>();
+  for (const p of voisins) {
+    if (membres.has(p.id)) continue;
+    for (const v of p.outer) {
+      const k = vertexKey(v);
+      if (surAnneau.has(k)) partages.add(k);
+    }
+    for (const trou of p.holes) {
+      for (const v of trou) {
+        const k = vertexKey(v);
+        if (surAnneau.has(k)) partages.add(k);
+      }
+    }
+  }
+  return partages;
+}
 
 function hit(pt: LonLat, input: ComposeInput): Poly | null {
   if (input.polyAt) return input.polyAt(pt);
@@ -79,7 +134,15 @@ export function composeFor(anchorId: number, input: ComposeInput): Composition {
   const united = topologicalUnion(members);
   if (!united.ok) return { ok: false, reason: united.reason };
 
-  const cleaned = simplify(dropCollinear(united.ring), input.simplifyToleranceM);
+  // Les sommets partagés avec un bâtiment voisin sont inamovibles : les supprimer
+  // découdrait le mur mitoyen, en silence (voir sommetsPartages).
+  const partages = sommetsPartages(united.ring, new Set(members.map(m => m.id)), input);
+  const inamovible = (p: LonLat): boolean => partages.has(vertexKey(p));
+  const cleaned = simplify(
+    dropCollinear(united.ring, undefined, inamovible),
+    input.simplifyToleranceM,
+    inamovible,
+  );
   if (isDegenerate(cleaned)) return { ok: false, reason: 'degenere' };
 
   return {
