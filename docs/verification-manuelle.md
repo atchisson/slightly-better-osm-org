@@ -58,10 +58,16 @@ Partir de `https://www.openstreetmap.org/` (la carte de consultation, pas
 l'éditeur), puis cliquer sur « Modifier » pour entrer dans iD par navigation interne,
 **sans recharger la page**.
 
-C'est le scénario qui a failli faire échouer toute l'approche : une navigation interne
-ne redéclenche pas forcément l'injection `document-start` de la même façon qu'un
-chargement direct, et c'est ce chemin qu'il faut vérifier séparément, pas seulement le
-scénario 1.
+Deux raisons distinctes justifient de vérifier ce chemin séparément du scénario 1, et
+aucune ne remplace l'autre :
+
+- une navigation interne ne redéclenche pas forcément l'injection `document-start` de
+  la même façon qu'un chargement direct — c'est le chemin identifié comme le plus
+  susceptible de faire échouer l'injection, dès la planification du projet ;
+- un incident distinct, constaté en cours de développement (voir la note technique
+  plus haut), a fait qu'une sonde qui écrivait sur le namespace `window.iD` a empêché
+  l'éditeur de démarrer — cet incident-là s'est produit indépendamment du chemin
+  d'entrée dans l'éditeur, pas spécifiquement à cause d'une navigation interne.
 
 - [ ] Le script s'injecte tout de même : mêmes vérifications que le scénario 1
       (`[cadastre-id] prêt`, bouton présent, pas d'erreur), effectuées après être

@@ -15,7 +15,10 @@ main.
 - **Aucune modification d'un objet OSM existant, en v1.** Sur un mur mitoyen, le
   greffon réutilise des nœuds OSM déjà présents — il ne les crée jamais en double —
   mais il les réutilise **en place, sans jamais les déplacer**, et ne touche donc à
-  aucune géométrie préexistante.
+  aucune géométrie préexistante. Ce n'est pas un cas rare : 70,3 % des bâtiments en
+  dur du cadastre (mesuré sur Angers) sont mitoyens d'un autre bâtiment en dur, donc
+  la mitoyenneté est la norme, pas l'exception — sans cette réutilisation, la plupart
+  des créations dupliqueraient un mur déjà tracé.
 - **Refus, pas remplacement, face à un bâtiment déjà cartographié.** Si un bâtiment OSM
   existe déjà à l'endroit cliqué, la création est refusée avec un message. Rien n'est
   écrasé ni fusionné.
@@ -155,13 +158,16 @@ plus grande.
 **C'est une heuristique, pas une certitude, et voici sa marge d'erreur mesurée** (sur
 le fichier réel d'Angers, 50 740 bâtiments) :
 
-- 16 % des constructions légères (2 063 sur 12 892) touchent au moins deux bâtiments en
-  dur — c'est le cas ambigu où l'heuristique doit trancher.
-- Parmi ces cas ambigus, **255 sont décidés à moins de cinq centimètres d'écart** entre
-  les deux frontières candidates, certains par une égalité exacte départagée
-  uniquement par l'ordre des identifiants. Un porche réellement partagé entre deux
-  maisons mitoyennes sera annexé au mauvais bâtiment dans une partie de ces cas — il
-  n'y a pas de règle géométrique qui tranche ça correctement à chaque fois.
+- 16 % des constructions légères (2 063 polygones sur 12 892) touchent au moins deux
+  bâtiments en dur — c'est le cas ambigu où l'heuristique doit trancher.
+- Une mesure séparée, à l'échelle des **composantes** (un groupe de légers connectés
+  entre eux, l'unité que l'heuristique attribue effectivement — pas le polygone
+  individuel du point précédent) : sur 2 072 composantes ambiguës mesurées, **255
+  (12,3 %) sont décidées à moins de cinq centimètres d'écart** entre les deux
+  frontières candidates, certains par une égalité exacte départagée uniquement par
+  l'ordre des identifiants. Un porche réellement partagé entre deux maisons
+  mitoyennes sera annexé au mauvais bâtiment dans une partie de ces cas — il n'y a pas
+  de règle géométrique qui tranche ça correctement à chaque fois.
 
 **La mitigation n'est pas algorithmique, elle est visuelle : l'aperçu au survol.** Le
 contour affiché au survol et celui créé au clic sont produits par exactement la même
