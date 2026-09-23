@@ -24,9 +24,18 @@ describe('arrondissementCodes', () => {
     expect(codes[19]).toBe('75120');
   });
 
-  it('éclate Lyon en neuf et Marseille en seize', () => {
-    expect(arrondissementCodes('69123')).toHaveLength(9);
-    expect(arrondissementCodes('13055')).toHaveLength(16);
+  it('éclate Lyon en neuf arrondissements', () => {
+    const codes = arrondissementCodes('69123');
+    expect(codes).toHaveLength(9);
+    expect(codes[0]).toBe('69381');
+    expect(codes[8]).toBe('69389');
+  });
+
+  it('éclate Marseille en seize arrondissements', () => {
+    const codes = arrondissementCodes('13055');
+    expect(codes).toHaveLength(16);
+    expect(codes[0]).toBe('13201');
+    expect(codes[15]).toBe('13216');
   });
 
   it('rend le code tel quel pour une commune ordinaire', () => {
