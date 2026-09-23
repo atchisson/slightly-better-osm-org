@@ -8,7 +8,17 @@ const NS = 'http://www.w3.org/2000/svg';
  *
  * Cet overlay est le seul garde-fou entre l'heuristique de fusion porche/bâtiment et
  * une mauvaise annexion publiée sur OpenStreetMap (voir les notes de la tâche 15) :
- * c'est ce module qui montre, avant le clic, le contour EXACT que le clic créerait.
+ * c'est ce module qui montre, avant le clic, le contour COMPOSÉ — c'est-à-dire quels
+ * polygones cadastre ont été fusionnés, la décision qui compte réellement pour la
+ * sécurité (255 porches par commune tranchés à moins de 5 cm). Ce contour est celui que
+ * `compose()` produit, AVANT le recalage aux nœuds OSM existants (`snapToExistingNodes`,
+ * task 13) : le survol ne recale jamais, donc le ring montré ici peut différer du ring
+ * effectivement créé par le clic — jamais dans la composition (quels polygones ont
+ * fusionné, ça ne bouge pas), seulement dans la position de certains sommets, et jamais
+ * de plus que la tolérance de recalage (`DEFAULT_SNAP_TOLERANCE_M`, 0,2 m aujourd'hui).
+ * (Revue : ce commentaire disait auparavant que ce module montre « le contour EXACT que
+ * le clic créerait », ce qui est faux dès que le recalage déplace un sommet — le cas
+ * courant, pas l'exception.)
  * Il vit délibérément hors du pipeline de rendu d'iD — un SVG que NOUS possédons,
  * ajouté au conteneur de la carte, jamais inséré dans les calques d'iD. C'est la même
  * discipline d'isolation que le bridge (task 14) applique aux internes d'iD.

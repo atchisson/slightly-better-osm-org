@@ -51,6 +51,15 @@ class CommuneIntrouvableError extends Error {
   }
 }
 
+/**
+ * Délai avant de recharger après un déplacement de carte : « quelque chose de l'ordre
+ * de la demi-seconde après que le mouvement se stabilise » (revue). Un déplacement de
+ * carte se traduit typiquement par une rafale d'événements move.* ; ce délai laisse la
+ * rafale se terminer avant de résoudre la commune, plutôt que d'interroger l'API à
+ * chaque événement intermédiaire.
+ */
+const RELOAD_DEBOUNCE_MS = 500;
+
 async function defaultLoadDataset(pt: LonLat): Promise<Dataset> {
   const commune = await communeAt(pt[1], pt[0]);
   if (!commune) throw new CommuneIntrouvableError();
@@ -71,17 +80,70 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
   let overlay: Overlay | null = null;
   let dataset: Dataset | null = null;
   let loading: Promise<void> | null = null;
+  let stopMapMove: (() => void) | null = null;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  // Vrai pendant qu'un rechargement déclenché par un déplacement de carte est en vol
+  // (voir scheduleReload). hoverAt le consulte pour ne jamais dessiner un contour qui
+  // viendrait de l'ancienne commune pendant que la nouvelle se charge — « cacher
+  // pendant l'échange est le comportement honnête » (revue).
+  let reloading = false;
 
-  const ensureDataset = (pt: LonLat): Promise<void> => {
-    if (dataset) return Promise.resolve();
-    loading ??= loadDataset(pt)
-      .then(d => { dataset = d; })
+  /**
+   * Démarre un chargement, l'enregistre dans `loading` (que whenReady() attend et que
+   * ce module utilise pour écarter un résultat périmé), et n'applique son résultat que
+   * si aucun chargement plus récent ne l'a entre-temps remplacé. Partagé par le premier
+   * chargement (ensureDataset) et par le rechargement au franchissement de frontière
+   * (scheduleReload) : les deux chemins doivent se protéger de la même façon contre une
+   * résolution tardive qui écraserait un jeu de données plus récent avec un plus ancien.
+   */
+  const startLoad = (pt: LonLat, apply: (d: Dataset) => void): Promise<void> => {
+    const p: Promise<void> = loadDataset(pt)
+      .then(d => { if (loading === p) apply(d); })
       .catch(err => {
+        if (loading !== p) return; // une charge plus récente a déjà pris le relais
         const reason = err instanceof CommuneIntrouvableError ? 'commune-introuvable' : 'reseau';
         notify(refusalMessage(reason));
       })
-      .finally(() => { loading = null; });
-    return loading;
+      .finally(() => { if (loading === p) loading = null; });
+    loading = p;
+    return p;
+  };
+
+  const ensureDataset = (pt: LonLat): Promise<void> => {
+    if (dataset) return Promise.resolve();
+    if (loading !== null) return loading;
+    return startLoad(pt, d => { dataset = d; });
+  };
+
+  const centreOf = (extent: [LonLat, LonLat]): LonLat => {
+    const [[minLon, minLat], [maxLon, maxLat]] = extent;
+    return [(minLon + maxLon) / 2, (minLat + maxLat) / 2];
+  };
+
+  /**
+   * Spec §3.3 : « Rechargement quand la carte change de commune ». Sans ce
+   * rechargement, une fois le premier jeu de données chargé, ensureDataset() ne charge
+   * plus jamais rien d'autre (`if (dataset) return Promise.resolve();`) : franchir une
+   * frontière de commune — un événement ordinaire, les communes françaises sont petites
+   * — fait échouer tout survol et tout clic avec « aucun bâtiment », silencieusement,
+   * exactement ce qu'un endroit réellement vide donnerait.
+   *
+   * Débattu sur `bridge.onMapMove`, avec un débounce : un déplacement de carte produit
+   * une rafale d'événements, et on ne résout la commune qu'une fois le mouvement
+   * stabilisé — jamais à chaque frame, jamais depuis hoverAt.
+   */
+  const scheduleReload = (): void => {
+    if (!enabled) return;
+    if (debounceTimer !== null) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      if (!enabled || !dataset) return; // rien de chargé encore : le premier chargement s'en charge
+      reloading = true;
+      overlay?.hide(); // le contour affiché appartient à l'ancienne commune : honnête de l'effacer
+      void startLoad(centreOf(bridge.mapExtent()), d => {
+        if (d.insee !== dataset?.insee) dataset = d;
+      }).finally(() => { reloading = false; });
+    }, RELOAD_DEBOUNCE_MS);
   };
 
   // Fermée sur `dataset` : composeAt() lit exactement l'état courant, jamais un
@@ -108,13 +170,18 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       if (enabled) return;
       enabled = true;
       overlay = createOverlay(bridge);
-      const [[minLon, minLat], [maxLon, maxLat]] = bridge.mapExtent();
-      const centre: LonLat = [(minLon + maxLon) / 2, (minLat + maxLat) / 2];
-      void ensureDataset(centre);
+      void ensureDataset(centreOf(bridge.mapExtent()));
+      // Le rechargement au franchissement de frontière (spec §3.3) : voir
+      // scheduleReload(). Désabonné dans disable(), comme le fait déjà createOverlay()
+      // pour son propre abonnement à onMapMove — même discipline, même contrat.
+      stopMapMove = bridge.onMapMove(scheduleReload);
     },
 
     disable() {
       enabled = false;
+      if (debounceTimer !== null) { clearTimeout(debounceTimer); debounceTimer = null; }
+      stopMapMove?.();
+      stopMapMove = null;
       // destroy(), pas hide() : un calque désactivé doit disparaître du DOM, pas
       // seulement se vider — sinon il continuerait de se redessiner sur un déplacement
       // de carte pendant que le mode est censé être éteint.
@@ -126,6 +193,11 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
 
     hoverAt(pt) {
       if (!enabled || !overlay) return;
+      // Un rechargement de commune est en vol : le dataset actuel appartient encore à
+      // l'ancienne commune (il ne sera remplacé qu'à la résolution de startLoad), donc
+      // tout contour qu'il produirait maintenant serait potentiellement celui d'un
+      // endroit que la carte a déjà quitté. Cacher plutôt que risquer de montrer faux.
+      if (reloading) { overlay.hide(); return; }
       const r = compose(pt);
       // r === null (dataset pas encore chargé) et r.ok === false (refus de composition,
       // qui ne porte jamais de ring) empruntent le même chemin : rien à montrer de

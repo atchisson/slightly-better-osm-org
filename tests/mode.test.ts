@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createMode } from '../src/mode';
 import type { IdBridge } from '../src/bridge/types';
 import { buildDataset, type Dataset } from '../src/cadastre/dataset';
+import { composeAt } from '../src/compose';
+import { segmentLength } from '../src/geometry/edges';
+import { DEFAULT_SNAP_TOLERANCE_M } from '../src/conflation/snap';
 import type { LonLat } from '../src/geometry/types';
 
 const feature = (type: string, ring: number[][]) => ({
@@ -168,14 +171,18 @@ describe('mode cadastre', () => {
     expect(container.querySelector('svg')).toBeNull();
   });
 
-  // --- Le survol et le clic ne doivent jamais pouvoir diverger ---
+  // --- Le survol et le clic ne doivent jamais diverger SUR LA COMPOSITION ---
   //
-  // Les deux appellent la même fonction de composition (compose(pt), fermée sur le
-  // même dataset). Ce test compare le contour effectivement dessiné par le survol
-  // (recalculé via bridge.project, comme le fait l'overlay) au contour effectivement
-  // transmis à createBuilding par le clic, pour le MÊME point : ils doivent coïncider
-  // exactement, pas seulement se ressembler.
-  it('le survol et le clic composent exactement le même contour pour le même point', async () => {
+  // Revue : ce test s'appelait « composent exactement le même contour » et comparait
+  // le ring dessiné au survol au ring transmis à createBuilding. Mais dans TOUT ce
+  // fichier, bridge.nodesNear renvoie toujours [] : snapToExistingNodes n'a donc jamais
+  // aucun candidat et ne change structurellement rien. Ce test ne pouvait prouver que
+  // « compose() est cohérent avec lui-même » (hoverAt et clickAt appellent la même
+  // fonction fermée sur le même dataset) — jamais que le recalage aux nœuds existants
+  // n'introduit pas de divergence, puisque le recalage était neutralisé par construction
+  // dans ce fixture. Renommé pour dire exactement ce qu'il prouve ; le test suivant
+  // couvre ce que celui-ci ne pouvait pas couvrir.
+  it('le survol et le clic appellent la même composition (compose() cohérent avec lui-même, sans recalage)', async () => {
     const d = deps();
     const mode = createMode(bridge, d);
     mode.enable();
@@ -194,6 +201,123 @@ describe('mode cadastre', () => {
       .join(' ') + ' Z';
 
     expect(dAvantClic).toBe(dAttendu);
+  });
+
+  // --- La propriété qui compte vraiment : même composition, recalage borné ---
+  //
+  // src/ui/overlay.ts est explicite (depuis la correction de cette revue) : l'overlay
+  // montre le contour COMPOSÉ, avant recalage aux nœuds — jamais le ring exact que le
+  // clic va créer dès que ce recalage fait quelque chose. La garantie de sécurité ne
+  // porte donc pas sur « le ring dessiné == le ring créé au bit près », mais sur :
+  // 1) même composition (même ancre, mêmes polygones absorbés) — c'est elle qui décide
+  //    quel porche rejoint quelle maison, la décision qui compte réellement ;
+  // 2) l'écart entre le ring montré et le ring créé est borné par la tolérance de
+  //    recalage (0,2 m), jamais plus, et jamais un sommet en trop ou en moins (ce qui
+  //    trahirait une composition différente, pas un simple recalage).
+  //
+  // Oracle indépendant : composeAt() est appelé ici directement sur un dataset construit
+  // à l'identique de celui que deps().loadDataset produira pour mode.ts — pas une
+  // relecture des internes de mode.ts, juste la même fonction pure appliquée aux mêmes
+  // données, ce que hoverAt/clickAt font forcément aussi (établi par le test précédent
+  // et par lecture de src/mode.ts : hoverAt et clickAt n'appellent que compose(pt),
+  // aucun cache, aucun raccourci propre à l'un ou l'autre).
+  it('le survol montre le contour composé ; le clic peut le recaler, sans jamais changer la composition', async () => {
+    const datasetRef = buildDataset('49007', '2026',
+      [feature('01', carre(0, 0)), feature('02', carre(0.001, 0))]);
+    const attendu = composeAt([0.0005, 0.0005], {
+      polys: datasetRef.polys,
+      absorption: datasetRef.absorption,
+      byId: datasetRef.byId,
+      lightIndex: datasetRef.lightIndex,
+      polyAt: datasetRef.polyAt,
+    });
+    if (!attendu.ok) throw new Error('précondition du test invalide : composition attendue en échec');
+    // La composition attendue elle-même : un dur (id 0) qui absorbe le léger mitoyen
+    // (id 1). Si ces valeurs changeaient, ce ne serait plus le même scénario.
+    expect(attendu.anchorId).toBe(0);
+    expect(attendu.absorbed).toEqual([1]);
+
+    // Un nœud OSM existant à ~11 cm du premier sommet du contour composé : à l'intérieur
+    // de la tolérance de recalage (0,2 m). snapToExistingNodes va donc déplacer CE
+    // sommet-là au clic, sans toucher à la composition.
+    const premierSommet = attendu.ring[0]!;
+    bridge.nodesNear = () => [{ id: 'n1', loc: [premierSommet[0] + 0.000001, premierSommet[1]] as LonLat }];
+
+    const d = deps();
+    const mode = createMode(bridge, d);
+    mode.enable();
+    await mode.whenReady();
+
+    mode.hoverAt([0.0005, 0.0005]);
+    const dSurvol = container.querySelector('path')!.getAttribute('d');
+    const dAttenduSurvol = attendu.ring
+      .map((p, i) => {
+        const [x, y] = bridge.project(p);
+        return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+      })
+      .join(' ') + ' Z';
+    // Le survol dessine le contour composé tel quel, jamais recalé.
+    expect(dSurvol).toBe(dAttenduSurvol);
+
+    await mode.clickAt([0.0005, 0.0005]);
+    const ringCree = created[0]!.ring as LonLat[];
+
+    // Même composition : même nombre de sommets qu'un ring qui aurait subi un recalage
+    // (le recalage ne fait jamais que déplacer des sommets existants, jamais n'en ajoute
+    // ni n'en retire).
+    expect(ringCree).toHaveLength(attendu.ring.length);
+    ringCree.forEach((p, i) => {
+      expect(segmentLength(p, attendu.ring[i]!)).toBeLessThanOrEqual(DEFAULT_SNAP_TOLERANCE_M);
+    });
+    // Et au moins un sommet a réellement bougé — sinon ce test ne prouverait rien sur le
+    // recalage lui-même, seulement (à nouveau) que compose() est déterministe.
+    expect(segmentLength(ringCree[0]!, attendu.ring[0]!)).toBeGreaterThan(0);
+  });
+
+  // --- Rechargement au franchissement d'une frontière de commune (spec §3.3) ---
+  //
+  // ensureDataset() ne charge qu'une fois : `if (dataset) return Promise.resolve();`
+  // sans lui. Une fois le jeu de données d'Angers chargé, sortir de la commune (la
+  // carte se déplace vers une autre commune) faisait échouer tout survol et tout clic
+  // avec « aucun bâtiment » — silencieusement, exactement ce qu'un endroit vraiment vide
+  // donne. Les communes françaises sont petites ; en franchir une est un cas ordinaire,
+  // pas un cas limite.
+  it('recharge le jeu de données quand la carte franchit une frontière de commune (survol utilise le nouveau)', async () => {
+    vi.useFakeTimers();
+    try {
+      const datasetA = buildDataset('49007', '2026', [feature('01', carre(0, 0))]);
+      const datasetB = buildDataset('49008', '2026', [feature('01', carre(0.5, 0.5))]);
+      const loadDataset = vi.fn(async (pt: LonLat): Promise<Dataset> =>
+        (pt[0] < 0.4 ? datasetA : datasetB));
+
+      let onMove: (() => void) | null = null;
+      bridge.onMapMove = (cb) => { onMove = cb; return () => { onMove = null; }; };
+
+      let extent: [LonLat, LonLat] = [[0, 0], [0.01, 0.01]]; // centre (0.005, 0.005) : commune A
+      bridge.mapExtent = () => extent;
+
+      const mode = createMode(bridge, { loadDataset, communeName: async () => 'X', notify: vi.fn() });
+      mode.enable();
+      await mode.whenReady(); // charge A
+
+      mode.hoverAt([0.0005, 0.0005]); // dans le bâtiment de A : aperçu visible
+      expect(container.querySelector('path')!.getAttribute('d')).not.toBe('');
+
+      // La carte se recentre sur la commune B (franchissement de frontière).
+      extent = [[0.495, 0.495], [0.505, 0.505]]; // centre (0.5, 0.5)
+      onMove!();
+      await vi.advanceTimersByTimeAsync(1000); // laisse le débounce puis le rechargement se dérouler
+
+      expect(loadDataset).toHaveBeenLastCalledWith([0.5, 0.5]);
+
+      mode.hoverAt([0.5, 0.5]); // dans le bâtiment de B — absent de A
+      expect(container.querySelector('path')!.getAttribute('d')).not.toBe('');
+
+      mode.hoverAt([0.0005, 0.0005]); // l'ancien point : n'existe plus dans B
+      expect(container.querySelector('path')!.getAttribute('d')).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
