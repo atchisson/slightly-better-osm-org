@@ -19,6 +19,17 @@ describe('buildingTags', () => {
     expect(buildingTags({ isolatedLight: false, millesime: '2026' }).wall).toBeUndefined();
   });
 
+  // Ce module porte la seule obligation légale du projet : la Licence Ouverte exige que
+  // l'origine ET le millésime figurent sur chaque objet créé. La garde précédente
+  // (`if (!input.millesime)`) ne rejetait QUE la chaîne vide — une chaîne d'espaces, un
+  // `latest`, ou n'importe quel texte se serait glissé dans l'attribution de chaque
+  // objet, sous la forme « Mise à jour :    » : lisible par personne, invérifiable.
+  for (const mauvais of ['', '   ', '	', '20', '12345', 'latest', '2026-06-01', 'inconnu', '  2026  ', '202a']) {
+    it(`refuse le millésime ${JSON.stringify(mauvais)} plutôt que d'en inventer un`, () => {
+      expect(() => buildingTags({ isolatedLight: false, millesime: mauvais })).toThrow(/millésime/i);
+    });
+  }
+
   it("refuse un millésime absent plutôt que d'en inventer un", () => {
     expect(() => buildingTags({ isolatedLight: false, millesime: '' })).toThrow(/millésime/i);
   });
