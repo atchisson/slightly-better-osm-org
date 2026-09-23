@@ -6,6 +6,42 @@ import type { LonLat, Ring } from '../geometry/types';
 // `storage` ne figure PAS ici : il n'existe plus sur le contexte (spike du 2026-09-23).
 const PRIMITIVES = ['map', 'history', 'graph', 'projection', 'perform', 'enter', 'container'] as const;
 
+// Suffixe unique par bridge construit. Sous la convention "un seul emplacement par
+// espace de nom" de d3/iD, un espace de nom fixe (littéral) partagé entre deux bridges
+// construits sur le même contexte ferait que le second remplace silencieusement les
+// écouteurs du premier. Un compteur suffit : monotone, jamais réutilisé, pas besoin
+// d'aléatoire pour éviter une collision.
+let bridgeInstanceCounter = 0;
+
+/**
+ * Vrai si `coreContext` est une propriété de DONNEES non configurable et non
+ * inscriptible sur `namespace` — la forme exacte où envelopper `coreContext` dans un
+ * Proxy est illégale.
+ *
+ * Repéré en revue, pas par le spike : aujourd'hui `coreContext` est un ACCESSEUR (un
+ * getter, sans setter), et pour un accesseur avec un getter présent, l'invariant
+ * [[Get]] du spec Proxy (ECMA-262 §9.5.8) n'impose RIEN sur ce que le piège `get` peut
+ * renvoyer — c'est le cas qui rend notre Proxy légal aujourd'hui. Mais si un futur
+ * build d'iD exposait plutôt `coreContext` comme une propriété de données figée
+ * (`{ value, writable: false, configurable: false }` — par exemple via
+ * `Object.freeze`), l'invariant devient strict : le piège `get` DOIT renvoyer
+ * exactement (SameValue) `desc.value`, sous peine d'une TypeError levée par le moteur
+ * lui-même, APRES le retour du piège — donc dans un cadre qu'aucun try/catch écrit ici
+ * ne peut intercepter. Vérifié en pratique (pas seulement en théorie) sur V8 :
+ * `TypeError: 'get' on proxy: property 'coreContext' is a read-only and
+ * non-configurable data property on the proxy target but the proxy did not return its
+ * actual value...`
+ *
+ * La défense ne peut donc pas être un garde ; il faut éviter la situation en amont. Si
+ * cette fonction renvoie vrai, on n'enveloppe pas du tout : le namespace est exposé
+ * intact, la capture ne se fait pas, et l'éditeur démarre normalement sans le greffon.
+ */
+function hasFrozenCoreContext(namespace: unknown): boolean {
+  if (namespace === null || (typeof namespace !== 'object' && typeof namespace !== 'function')) return false;
+  const desc = Object.getOwnPropertyDescriptor(namespace, 'coreContext');
+  return desc?.writable === false && desc.configurable === false;
+}
+
 /**
  * Pose un piège sur window.iD et résout dès que coreContext() a produit une instance.
  *
@@ -39,6 +75,15 @@ export function captureContext(): Promise<unknown> {
         get: () => exposed,
         set(value: any) {
           try {
+            if (hasFrozenCoreContext(value)) {
+              console.log(
+                "[cadastre-id] coreContext est une propriete figee (non configurable, " +
+                "non inscriptible) : capture desactivee, l'editeur demarre normalement " +
+                "sans le greffon.",
+              );
+              exposed = value;
+              return;
+            }
             exposed = wrap(value);
           } catch {
             exposed = value; // iD doit démarrer même si on échoue
@@ -76,6 +121,11 @@ function ringOverlapsExtent(ring: Ring, extent: [LonLat, LonLat]): boolean {
 }
 
 function buildBridge(c: any): IdBridge {
+  // Suffixe propre à CET appel de buildBridge (voir bridgeInstanceCounter plus haut) :
+  // deux bridges construits sur le même contexte (retry, re-init...) ne doivent jamais
+  // se marcher dessus sur un espace de nom d3/iD.
+  const ns = `cadastre-id-${++bridgeInstanceCounter}`;
+
   // Cache des bâtiments existants de la vue courante.
   //
   // Mesuré sur un contexte synthétique dimensionné comme la vue réelle du spike
@@ -85,14 +135,14 @@ function buildBridge(c: any): IdBridge {
   // depuis hoverAt (une fois par mouvement de souris). D'où le cache.
   //
   // Invalidé :
-  //  - au déplacement de la carte, sur l'événement 'move' de map() (primitive déjà
-  //    utilisée par onMapMove, donc déjà supposée disponible par la conception
-  //    d'origine — ceci n'ajoute pas de nouvelle hypothèse non vérifiée) ;
+  //  - au déplacement de la carte, sur l'événement 'move' de map() — SI le contexte le
+  //    permet, voir la tentative juste en dessous : le spike a vérifié
+  //    map().extent().rectangle(), jamais map().on/off ;
   //  - après un perform() déclenché par NOTRE PROPRE createBuilding, seul endroit où ce
   //    bridge modifie le graphe lui-même ;
   //  - au changement de graphe fait AILLEURS dans iD (l'utilisatrice déplace un nœud
   //    existant, dessine un autre bâtiment à la main, annule/rétablit...), SI le
-  //    contexte le permet — voir la tentative juste en dessous.
+  //    contexte le permet — voir la seconde tentative juste en dessous.
   let buildingCache: ExistingBuilding[] | null = null;
 
   const allBuildings = (): ExistingBuilding[] => {
@@ -100,7 +150,7 @@ function buildBridge(c: any): IdBridge {
     const entities = c.history().intersects(c.map().extent()) as any[];
     const graph = c.graph();
     buildingCache = entities
-      .filter(e => e.type === 'way' && e.tags?.building)
+      .filter(e => e.type === 'way' && e.tags?.building && e.tags.building !== 'no')
       .map(e => ({
         id: e.id as string,
         ring: (e.nodes as string[]).map(id => graph.entity(id).loc as LonLat),
@@ -108,9 +158,20 @@ function buildBridge(c: any): IdBridge {
     return buildingCache;
   };
 
-  // Espace de nom distinct de celui utilisé par onMapMove ('move.cadastre-id') : les
-  // deux doivent coexister sans se remplacer l'un l'autre.
-  c.map().on('move.cadastre-id-cache', () => { buildingCache = null; });
+  // Tentative, pas hypothèse : le spike n'a jamais exercé map().on/off, seulement
+  // map().extent().rectangle(). C'est la même incertitude que pour history().on()
+  // juste en dessous, donc le même traitement : sous try/catch, dégradation en
+  // console si ça échoue plutôt qu'une exception qui remonterait hors de makeBridge.
+  // Espace de nom distinct de celui d'onMapMove (même préfixe `ns`, suffixe `-cache`
+  // en plus) : les deux doivent coexister sans se remplacer l'un l'autre.
+  try {
+    c.map().on(`move.${ns}-cache`, () => { buildingCache = null; });
+  } catch {
+    console.log(
+      "[cadastre-id] aucun signal de deplacement de carte verifie sur map() : " +
+      "le cache des batiments existants ne s'invalide plus qu'apres nos propres modifications.",
+    );
+  }
 
   // Tentative, pas hypothèse : le spike a vérifié que history() existe et que
   // history().intersects() fonctionne, jamais ce que l'objet renvoyé expose par
@@ -121,7 +182,7 @@ function buildBridge(c: any): IdBridge {
   // dégradation est silencieuse pour l'éditeur, mais dite une fois en console, pour
   // quiconque déboguerait, plutôt qu'enterrée dans un commentaire.
   try {
-    c.history().on('change.cadastre-id-cache', () => { buildingCache = null; });
+    c.history().on(`change.${ns}-cache`, () => { buildingCache = null; });
   } catch {
     console.log(
       "[cadastre-id] aucun signal de changement du graphe verifie sur history() : " +
@@ -144,8 +205,19 @@ function buildBridge(c: any): IdBridge {
     },
 
     onMapMove(cb: () => void): () => void {
-      c.map().on('move.cadastre-id', cb);
-      return () => c.map().off('move.cadastre-id', cb);
+      // Même tentative que le cache interne, avec le même degré de prudence : le
+      // spike n'a jamais exercé map().on/off. Si ça échoue, on ne casse pas l'appelant
+      // (Task 15/16) : on rend un désabonnement inoffensif plutôt que de propager.
+      try {
+        c.map().on(`move.${ns}`, cb);
+        return () => c.map().off(`move.${ns}`, cb);
+      } catch {
+        console.log(
+          "[cadastre-id] aucun signal de deplacement de carte verifie sur map() : " +
+          "onMapMove n'appellera jamais son callback.",
+        );
+        return () => {};
+      }
     },
 
     buildingsNear(extent: [LonLat, LonLat]): ExistingBuilding[] {

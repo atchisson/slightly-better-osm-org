@@ -54,6 +54,40 @@ describe('captureContext', () => {
     expect(() => { (globalThis as any).iD = ns; }).not.toThrow();
     expect(() => (globalThis as any).iD.piege).toThrow(/propriété défaillante/);
   });
+
+  // Cas relevé en revue : le Proxy est légal aujourd'hui uniquement parce que
+  // coreContext est un ACCESSEUR (get présent). Si un futur build d'iD exposait
+  // coreContext comme une propriété de DONNEES non configurable et non inscriptible,
+  // renvoyer autre chose que sa valeur exacte violerait l'invariant [[Get]] du spec
+  // Proxy (§9.5.8) — le moteur lève lui-même une TypeError, APRES le retour du piège
+  // get, donc hors de portée de tout try/catch écrit dans ce fichier. Vérifié en
+  // pratique avant d'écrire ce test (pas seulement en théorie) : sans la fonction
+  // hasFrozenCoreContext(), ce même scénario lève bel et bien sur V8 :
+  // "TypeError: 'get' on proxy: property 'coreContext' is a read-only and
+  // non-configurable data property on the proxy target but the proxy did not return
+  // its actual value...". La défense ne peut donc pas être un garde ; il faut éviter
+  // la situation en amont : ne pas envelopper du tout.
+  it('n’installe pas de Proxy si coreContext est une propriété de données figée (non configurable, non inscriptible)', () => {
+    const espion = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      captureContext();
+      const original = () => ({ ok: true });
+      const ns: any = {};
+      Object.defineProperty(ns, 'coreContext', { value: original, writable: false, configurable: false, enumerable: true });
+
+      expect(() => { (globalThis as any).iD = ns; }).not.toThrow();
+
+      let lu: unknown;
+      expect(() => { lu = (globalThis as any).iD.coreContext; }).not.toThrow();
+      // Identité exacte (pas seulement même comportement) : preuve qu'aucun wrapper
+      // n'a été installé, pas juste qu'un wrapper équivalent ne lève pas.
+      expect(lu).toBe(original);
+
+      expect(espion).toHaveBeenCalledWith(expect.stringContaining('coreContext'));
+    } finally {
+      espion.mockRestore();
+    }
+  });
 });
 
 describe('makeBridge', () => {
@@ -115,6 +149,16 @@ describe('buildingsNear', () => {
     const proche = { type: 'way', id: 'w1', tags: { building: 'yes' }, nodes: ['a', 'b', 'c', 'd', 'a'] };
     const loin = { type: 'way', id: 'w2', tags: { building: 'yes' }, nodes: ['e', 'f', 'g', 'h', 'e'] };
     const bridge = makeBridge(ctxAvec([proche, loin]));
+
+    const result = bridge.buildingsNear([[-1, -1], [2, 2]]);
+
+    expect(result.map(b => b.id)).toEqual(['w1']);
+  });
+
+  it('ignore une way taguée building=no : ce n’est pas un bâtiment existant', () => {
+    const vrai = { type: 'way', id: 'w1', tags: { building: 'yes' }, nodes: ['a', 'b', 'c', 'd', 'a'] };
+    const demoli = { type: 'way', id: 'w2', tags: { building: 'no' }, nodes: ['a', 'b', 'c', 'd', 'a'] };
+    const bridge = makeBridge(ctxAvec([vrai, demoli]));
 
     const result = bridge.buildingsNear([[-1, -1], [2, 2]]);
 
@@ -189,6 +233,28 @@ describe('cache de buildingsNear', () => {
     bridge.buildingsNear(vueEntiere);
 
     expect(appels()).toBe(2);
+  });
+
+  // Les espaces de nom des écouteurs internes (move.*, change.*) sont des littéraux
+  // fixes : sous la convention "un seul emplacement par espace de nom" de d3/iD,
+  // construire un second bridge sur le MÊME contexte remplacerait silencieusement
+  // l'écouteur du premier — un cache qui survit à sa propre garantie de fraîcheur,
+  // sans qu'on le voie. Chaque bridge doit donc avoir un suffixe d'espace de nom qui
+  // lui est propre.
+  it('deux bridges construits sur le même contexte invalident chacun leur propre cache', () => {
+    const { ctx, appels, declencherDeplacement } = ctxAvecCompteur([batiment]);
+    const bridge1 = makeBridge(ctx);
+    const bridge2 = makeBridge(ctx);
+
+    bridge1.buildingsNear(vueEntiere); // peuple le cache du bridge 1
+    bridge2.buildingsNear(vueEntiere); // peuple le cache du bridge 2
+    expect(appels()).toBe(2);
+
+    declencherDeplacement(); // doit invalider les DEUX caches, pas un seul
+
+    bridge1.buildingsNear(vueEntiere);
+    bridge2.buildingsNear(vueEntiere);
+    expect(appels()).toBe(4);
   });
 
   it('reconstruit le cache après createBuilding, pour voir le bâtiment qu’il vient de créer', () => {
@@ -274,5 +340,84 @@ describe('cache de buildingsNear', () => {
     } finally {
       espion.mockRestore();
     }
+  });
+
+  // Le spike a vérifié map().extent().rectangle(), jamais map().on/off — la même
+  // incertitude que pour history().on(), et le même risque : c'est cet appel précis,
+  // non gardé, qui a cassé l'éditeur au premier passage (une exception remontée
+  // pendant l'installation du greffon). Couvre à la fois le cache interne et la
+  // méthode publique onMapMove.
+  it('ne lève jamais même si map().on() échoue (déplacement de carte)', () => {
+    const espion = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const ctx = {
+        map: () => ({
+          extent: () => ({ rectangle: () => [-90, -90, 90, 90] }),
+          on: () => { throw new Error('map().on indisponible'); },
+          off: () => { throw new Error('map().off indisponible'); },
+        }),
+        history: () => ({ intersects: () => [] }),
+        graph: () => ({ entity: () => ({ loc: [0, 0] }) }),
+        projection: Object.assign((p: unknown) => p, { invert: (p: unknown) => p }),
+        perform: () => {},
+        enter: () => {},
+        container: () => ({}),
+      };
+
+      let bridge: ReturnType<typeof makeBridge> | undefined;
+      expect(() => { bridge = makeBridge(ctx); }).not.toThrow();
+      expect(() => bridge!.buildingsNear([[0, 0], [1, 1]])).not.toThrow();
+
+      let desabonner: (() => void) | undefined;
+      expect(() => { desabonner = bridge!.onMapMove(() => {}); }).not.toThrow();
+      expect(() => desabonner!()).not.toThrow();
+
+      expect(espion).toHaveBeenCalledWith(expect.stringContaining('map()'));
+    } finally {
+      espion.mockRestore();
+    }
+  });
+});
+
+describe('prefillChangeset', () => {
+  // Contexte minimal : seules les primitives exigées par PRIMITIVES comptent ici, le
+  // reste du bridge n'est pas exercé par ces tests.
+  const ctxMinimal = () => ({
+    map: () => ({ extent: () => ({ rectangle: () => [0, 0, 1, 1] }), on: () => {}, off: () => {} }),
+    history: () => ({ intersects: () => [] }),
+    graph: () => ({ entity: () => ({ loc: [0, 0] }) }),
+    projection: Object.assign((p: unknown) => p, { invert: (p: unknown) => p }),
+    perform: () => {},
+    enter: () => {},
+    container: () => ({}),
+  });
+
+  beforeEach(() => {
+    localStorage.clear();
+    delete (globalThis as any).iD;
+  });
+
+  it('écrit comment et commentDate via iD.prefs quand il existe', () => {
+    const ecrits: Record<string, string> = {};
+    (globalThis as any).iD = { prefs: (k: string, v: string) => { ecrits[k] = v; } };
+    const bridge = makeBridge(ctxMinimal());
+
+    bridge.prefillChangeset('Bâtiment ajouté depuis le cadastre');
+
+    expect(ecrits['comment']).toBe('Bâtiment ajouté depuis le cadastre');
+    // iD périme un commentaire trop ancien : oublier commentDate le ferait ignorer en
+    // silence (spike du 2026-09-23).
+    expect(ecrits['commentDate']).toBeDefined();
+    expect(Number(ecrits['commentDate'])).not.toBeNaN();
+  });
+
+  it('se rabat sur localStorage, sous la clé non préfixée "comment", quand iD.prefs est absent', () => {
+    const bridge = makeBridge(ctxMinimal());
+
+    bridge.prefillChangeset('Bâtiment ajouté depuis le cadastre');
+
+    expect(localStorage.getItem('comment')).toBe('Bâtiment ajouté depuis le cadastre');
+    expect(localStorage.getItem('commentDate')).not.toBeNull();
+    expect(Number(localStorage.getItem('commentDate'))).not.toBeNaN();
   });
 });
