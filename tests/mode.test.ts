@@ -321,7 +321,12 @@ describe('mode cadastre', () => {
       let extent: [LonLat, LonLat] = [[0, 0], [0.01, 0.01]]; // centre (0.005, 0.005) : commune A
       bridge.mapExtent = () => extent;
 
-      const mode = createMode(bridge, { loadDataset, communeName: async () => 'X', notify: vi.fn() });
+      const mode = createMode(bridge, {
+        loadDataset,
+        communeCodeAt: async (pt: LonLat) => (pt[0] < 0.4 ? '49007' : '49008'),
+        communeName: async () => 'X',
+        notify: vi.fn(),
+      });
       mode.enable();
       await mode.whenReady(); // charge A
 
@@ -340,6 +345,118 @@ describe('mode cadastre', () => {
 
       mode.hoverAt([0.0005, 0.0005]); // l'ancien point : n'existe plus dans B
       expect(container.querySelector('path')!.getAttribute('d')).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+
+  // --- Revue finale (I2) : un déplacement ne recharge plus la commune entière ---
+  //
+  // `scheduleReload` lançait `loadDataset` puis ne comparait l'INSEE qu'APRÈS coup, pour
+  // jeter le résultat s'il était identique. Comme il est branché sur `move` (panoramique
+  // ET zoom), chaque déplacement payait une résolution réseau, ~20 Mo de
+  // désérialisation IndexedDB et `buildDataset` (1 142 ms mesurés sur Angers, bien plus
+  // sur Marseille) — pour presque toujours rien. Et pendant tout ce temps
+  // `loading !== null`, donc `hoverAt` cachait l'aperçu : chaque déplacement éteignait
+  // le survol pendant une à trois secondes.
+  it('un déplacement sans changement de commune ne recharge pas le jeu de données', async () => {
+    vi.useFakeTimers();
+    try {
+      const datasetA = buildDataset('49007', '2026', [feature('01', carre(0, 0))]);
+      const loadDataset = vi.fn(async (): Promise<Dataset> => datasetA);
+      const { declencherDeplacement } = bridgeAvecDeplacements(bridge);
+      let extent: [LonLat, LonLat] = [[0, 0], [0.01, 0.01]];
+      bridge.mapExtent = () => extent;
+
+      const mode = createMode(bridge, {
+        loadDataset,
+        communeCodeAt: async () => '49007',   // la carte ne quitte jamais Angers
+        communeName: async () => 'Angers',
+        notify: vi.fn(),
+      });
+      mode.enable();
+      await mode.whenReady();
+
+      extent = [[0.001, 0.001], [0.011, 0.011]]; // un simple panoramique
+      declencherDeplacement();
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(loadDataset).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('un déplacement dans la même commune n’éteint pas le survol', async () => {
+    vi.useFakeTimers();
+    try {
+      const datasetA = buildDataset('49007', '2026', [feature('01', carre(0, 0))]);
+      let appels = 0;
+      // Le second chargement ne se résout JAMAIS : il tient le rôle du chargement d'une
+      // à trois secondes pendant lequel hoverAt cachait l'aperçu.
+      const loadDataset = vi.fn((): Promise<Dataset> => {
+        appels++;
+        return appels === 1 ? Promise.resolve(datasetA) : new Promise<Dataset>(() => {});
+      });
+      const { declencherDeplacement } = bridgeAvecDeplacements(bridge);
+      let extent: [LonLat, LonLat] = [[0, 0], [0.01, 0.01]];
+      bridge.mapExtent = () => extent;
+
+      const mode = createMode(bridge, {
+        loadDataset,
+        communeCodeAt: async () => '49007',
+        communeName: async () => 'Angers',
+        notify: vi.fn(),
+      });
+      mode.enable();
+      await mode.whenReady();
+
+      extent = [[0.001, 0.001], [0.011, 0.011]];
+      declencherDeplacement();
+      await vi.advanceTimersByTimeAsync(600);
+
+      mode.hoverAt([0.0005, 0.0005]);
+      expect(container.querySelector('path')!.getAttribute('d')).not.toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('un panoramique pendant le chargement de la nouvelle commune ne le relance pas', async () => {
+    vi.useFakeTimers();
+    try {
+      const datasetA = buildDataset('49007', '2026', [feature('01', carre(0, 0))]);
+      let appels = 0;
+      const loadDataset = vi.fn((): Promise<Dataset> => {
+        appels++;
+        return appels === 1 ? Promise.resolve(datasetA) : new Promise<Dataset>(() => {});
+      });
+      const { declencherDeplacement } = bridgeAvecDeplacements(bridge);
+      let extent: [LonLat, LonLat] = [[0, 0], [0.01, 0.01]];
+      bridge.mapExtent = () => extent;
+
+      const mode = createMode(bridge, {
+        loadDataset,
+        communeCodeAt: async (pt: LonLat) => (pt[0] < 0.4 ? '49007' : '49008'),
+        communeName: async () => 'X',
+        notify: vi.fn(),
+      });
+      mode.enable();
+      await mode.whenReady();
+
+      extent = [[0.495, 0.495], [0.505, 0.505]]; // on entre dans 49008 : rechargement
+      declencherDeplacement();
+      await vi.advanceTimersByTimeAsync(600);
+      expect(loadDataset).toHaveBeenCalledTimes(2);
+
+      // Encore un panoramique, toujours dans 49008, pendant que son chargement est en
+      // vol : `dataset.insee` vaut encore 49007, donc sans mémoire du chargement en
+      // cours on relancerait le même chargement.
+      extent = [[0.5, 0.5], [0.51, 0.51]];
+      declencherDeplacement();
+      await vi.advanceTimersByTimeAsync(600);
+      expect(loadDataset).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
@@ -375,6 +492,7 @@ describe('mode cadastre', () => {
 
       const mode = createMode(bridge, {
         loadDataset,
+        communeCodeAt: async (pt: LonLat) => (pt[0] < 0.4 ? '49007' : '49008'),
         communeName: async () => 'X',
         notify,
       });
@@ -493,7 +611,13 @@ describe('mode cadastre', () => {
       let extent: [LonLat, LonLat] = [[0, 0], [0.01, 0.01]];
       bridge.mapExtent = () => extent;
 
-      const mode = createMode(bridge, { loadDataset, communeName: async () => 'X', notify: vi.fn() });
+      const mode = createMode(bridge, {
+        loadDataset,
+        communeCodeAt: async (pt: LonLat) =>
+          (pt[0] < 0.4 ? '49007' : pt[0] < 0.7 ? '49008' : '49009'),
+        communeName: async () => 'X',
+        notify: vi.fn(),
+      });
       mode.enable();
       await mode.whenReady(); // charge A (appel 1)
 
@@ -554,7 +678,14 @@ describe('mode cadastre', () => {
       bridge.mapExtent = () => extent;
       const notify = vi.fn();
 
-      const mode = createMode(bridge, { loadDataset, communeName: async () => 'X', notify });
+      // Chaque déplacement franchit une frontière : sinon, depuis le correctif I2,
+      // aucun rechargement ne serait tenté et il n'y aurait rien à notifier.
+      const mode = createMode(bridge, {
+        loadDataset,
+        communeCodeAt: async (pt: LonLat) => `49${Math.round(pt[0] * 100)}`,
+        communeName: async () => 'X',
+        notify,
+      });
       mode.enable();
       await mode.whenReady(); // charge A avec succès
 
@@ -592,7 +723,12 @@ describe('mode cadastre', () => {
       bridge.mapExtent = () => extent;
       const notify = vi.fn();
 
-      const mode = createMode(bridge, { loadDataset, communeName: async () => 'X', notify });
+      const mode = createMode(bridge, {
+        loadDataset,
+        communeCodeAt: async (pt: LonLat) => `49${Math.round(pt[0] * 100)}`,
+        communeName: async () => 'X',
+        notify,
+      });
       mode.enable();
       await mode.whenReady();
 

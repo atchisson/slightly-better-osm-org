@@ -15,6 +15,16 @@ import type { LonLat } from './geometry/types';
 
 export interface ModeDeps {
   loadDataset(pt: LonLat): Promise<Dataset>;
+  /**
+   * Code INSEE de la commune sous un point, ou null hors couverture.
+   *
+   * Exposé séparément de `loadDataset` pour qu'on puisse répondre à « la carte a-t-elle
+   * changé de commune ? » sans payer un chargement complet. C'est une requête JSON de
+   * quelques octets ; `loadDataset`, lui, coûte une résolution réseau, ~20 Mo de
+   * désérialisation IndexedDB et la reconstruction du jeu de données (1 142 ms mesurés
+   * sur Angers, bien plus sur Marseille).
+   */
+  communeCodeAt(pt: LonLat): Promise<string | null>;
   communeName(pt: LonLat): Promise<string>;
   notify(message: string): void;
 }
@@ -73,6 +83,8 @@ async function defaultLoadDataset(pt: LonLat): Promise<Dataset> {
 
 export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): CadastreMode {
   const loadDataset = deps.loadDataset ?? defaultLoadDataset;
+  const communeCodeAt = deps.communeCodeAt ?? (async (pt: LonLat) =>
+    (await communeAt(pt[1], pt[0]))?.code ?? null);
   const communeName = deps.communeName ?? (async (pt: LonLat) =>
     (await communeAt(pt[1], pt[0]))?.nom ?? '');
   const notify = deps.notify ?? ((m: string) => console.warn('[cadastre-id]', m));
@@ -87,6 +99,30 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
   // réussi. Sert uniquement à ne pas répéter la même notification en boucle (voir
   // startLoad) — jamais consultée pour décider quoi que ce soit d'autre.
   let lastFailureReason: 'commune-introuvable' | 'reseau' | null = null;
+  /**
+   * INSEE visé par le rechargement en vol, ou null si aucun.
+   *
+   * Sans lui, un second panoramique À L'INTÉRIEUR de la commune qu'on est en train de
+   * charger relancerait un chargement identique : `dataset.insee` vaut encore celui de
+   * la commune QUITTÉE tant que le chargement n'a pas abouti, donc la comparaison
+   * « même commune ? » répondrait faux une seconde fois.
+   */
+  let loadingInsee: string | null = null;
+
+  /**
+   * Notifie une panne, sauf si c'est exactement la même que la précédente.
+   *
+   * Un rechargement déclenché par onMapMove peut se représenter toutes les 500 ms près
+   * d'une frontière de commune ou pendant une panne réseau : sans cette garde, chaque
+   * tentative identique rouvrirait `notify` (window.alert en production), un dialogue
+   * bloquant à répétition qui rendrait le greffon inutilisable (revue, deuxième passe).
+   * Une raison qui CHANGE notifie quand même — ce n'est plus la même panne.
+   */
+  const notifyFailure = (reason: 'commune-introuvable' | 'reseau'): void => {
+    if (reason === lastFailureReason) return;
+    lastFailureReason = reason;
+    notify(refusalMessage(reason));
+  };
 
   /**
    * Démarre un chargement, l'enregistre dans `loading` (que whenReady() attend et que
@@ -115,16 +151,7 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       })
       .catch(err => {
         if (loading !== p) return; // une charge plus récente a déjà pris le relais
-        const reason = err instanceof CommuneIntrouvableError ? 'commune-introuvable' : 'reseau';
-        // Un rechargement déclenché par onMapMove peut se représenter toutes les
-        // 500 ms près d'une frontière de commune ou pendant une panne réseau : sans
-        // cette garde, chaque tentative identique rouvrirait `notify` (window.alert en
-        // production), un dialogue bloquant à répétition qui rendrait le greffon
-        // inutilisable près d'une frontière (revue, deuxième passe). Une raison qui
-        // CHANGE notifie quand même — ce n'est plus la même panne.
-        if (reason === lastFailureReason) return;
-        lastFailureReason = reason;
-        notify(refusalMessage(reason));
+        notifyFailure(err instanceof CommuneIntrouvableError ? 'commune-introuvable' : 'reseau');
       })
       .finally(() => { if (loading === p) loading = null; });
     loading = p;
@@ -175,12 +202,55 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
     if (debounceTimer !== null) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
-      if (!enabled || !dataset) return; // rien de chargé encore : le premier chargement s'en charge
-      overlay?.hide(); // le contour affiché appartient à l'ancienne commune : honnête de l'effacer
-      void startLoad(centreOf(bridge.mapExtent()), d => {
-        if (d.insee !== dataset?.insee) dataset = d;
-      });
+      void maybeReload();
     }, RELOAD_DEBOUNCE_MS);
+  };
+
+  /**
+   * Résout la commune D'ABORD, ne recharge QUE si elle a changé.
+   *
+   * Avant ce correctif, le débounce lançait directement `loadDataset` et ne comparait
+   * l'INSEE qu'APRÈS coup, pour jeter le résultat s'il était identique. Autrement dit,
+   * chaque panoramique et chaque zoom — `scheduleReload` est branché sur `move`, qui
+   * couvre les deux — payait la résolution réseau, ~20 Mo de désérialisation IndexedDB
+   * puis `buildDataset` (index des arêtes, composantes, grille : 1 142 ms mesurés sur
+   * Angers, bien plus sur Marseille), pour presque toujours rien. Et pendant tout ce
+   * temps `loading !== null`, donc `hoverAt` CACHAIT l'aperçu : chaque déplacement
+   * éteignait le survol pendant une à trois secondes.
+   *
+   * La résolution de commune coûte, elle, une requête JSON de quelques octets.
+   */
+  const maybeReload = async (): Promise<void> => {
+    if (!enabled || !dataset) return; // rien de chargé encore : le premier chargement s'en charge
+
+    const pt = centreOf(bridge.mapExtent());
+    let code: string | null;
+    try {
+      code = await communeCodeAt(pt);
+    } catch {
+      notifyFailure('reseau');
+      return;
+    }
+    // Le mode a pu être coupé, ou le premier chargement échouer, pendant la résolution.
+    if (!enabled || !dataset) return;
+
+    if (code === null) { notifyFailure('commune-introuvable'); return; }
+    if (code === dataset.insee || code === loadingInsee) {
+      // Même commune : rien à recharger, et surtout rien à cacher — c'est le cas de
+      // loin le plus fréquent. La résolution a répondu, donc le réseau fonctionne : une
+      // prochaine panne mérite d'être annoncée même si elle ressemble à la précédente.
+      lastFailureReason = null;
+      return;
+    }
+
+    overlay?.hide(); // le contour affiché appartient à l'ancienne commune : honnête de l'effacer
+    loadingInsee = code;
+    void startLoad(pt, d => {
+      if (d.insee !== dataset?.insee) dataset = d;
+    }).finally(() => {
+      // Ne libère QUE si un rechargement plus récent n'a pas déjà repris la place.
+      if (loadingInsee === code) loadingInsee = null;
+    });
   };
 
   // Fermée sur `dataset` : composeAt() lit exactement l'état courant, jamais un
