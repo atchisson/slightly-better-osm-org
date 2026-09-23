@@ -61,3 +61,32 @@ describe('makeBridge', () => {
     expect(makeBridge(ctxComplet()).invert([250, 400])).toEqual([2.5, 4]);
   });
 });
+
+describe('buildingsNear', () => {
+  const nodes: Record<string, { loc: [number, number] }> = {
+    a: { loc: [0, 0] }, b: { loc: [1, 0] }, c: { loc: [1, 1] }, d: { loc: [0, 1] },
+    e: { loc: [10, 10] }, f: { loc: [11, 10] }, g: { loc: [11, 11] }, h: { loc: [10, 11] },
+  };
+
+  const ctxAvec = (entities: any[]) => ({
+    // La vue courante est large ; c'est le paramètre extent de buildingsNear, pas la
+    // vue, qui doit restreindre le résultat.
+    map: () => ({ extent: () => ({ rectangle: () => [-90, -90, 90, 90] }), on: () => {}, off: () => {} }),
+    history: () => ({ intersects: () => entities }),
+    graph: () => ({ entity: (id: string) => nodes[id] }),
+    projection: Object.assign((p: unknown) => p, { invert: (p: unknown) => p }),
+    perform: () => {},
+    enter: () => {},
+    container: () => ({}),
+  });
+
+  it('filtre au rectangle demandé plutôt que de rendre toute la vue', () => {
+    const proche = { type: 'way', id: 'w1', tags: { building: 'yes' }, nodes: ['a', 'b', 'c', 'd', 'a'] };
+    const loin = { type: 'way', id: 'w2', tags: { building: 'yes' }, nodes: ['e', 'f', 'g', 'h', 'e'] };
+    const bridge = makeBridge(ctxAvec([proche, loin]));
+
+    const result = bridge.buildingsNear([[-1, -1], [2, 2]]);
+
+    expect(result.map(b => b.id)).toEqual(['w1']);
+  });
+});

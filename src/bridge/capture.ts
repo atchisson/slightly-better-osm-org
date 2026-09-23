@@ -62,6 +62,19 @@ export function makeBridge(ctx: unknown): IdBridge {
   return buildBridge(c);
 }
 
+/** Chevauchement de rectangles englobants : vrai dès que l'anneau touche l'étendue. */
+function ringOverlapsExtent(ring: Ring, extent: [LonLat, LonLat]): boolean {
+  const [[minLon, minLat], [maxLon, maxLat]] = extent;
+  let rMinLon = Infinity, rMinLat = Infinity, rMaxLon = -Infinity, rMaxLat = -Infinity;
+  for (const [lon, lat] of ring) {
+    if (lon < rMinLon) rMinLon = lon;
+    if (lon > rMaxLon) rMaxLon = lon;
+    if (lat < rMinLat) rMinLat = lat;
+    if (lat > rMaxLat) rMaxLat = lat;
+  }
+  return rMinLon <= maxLon && rMaxLon >= minLon && rMinLat <= maxLat && rMaxLat >= minLat;
+}
+
 function buildBridge(c: any): IdBridge {
   return {
     mapExtent(): [LonLat, LonLat] {
@@ -82,7 +95,12 @@ function buildBridge(c: any): IdBridge {
       return () => c.map().off('move.cadastre-id', cb);
     },
 
-    buildingsNear(_extent: [LonLat, LonLat]): ExistingBuilding[] {
+    buildingsNear(extent: [LonLat, LonLat]): ExistingBuilding[] {
+      // `history().intersects()` attend un objet Extent d'iD (celui que rend
+      // `map().extent()`), pas le simple tuple [LonLat, LonLat] de l'interface :
+      // `geoExtent` n'a pas été vérifié par le spike, donc on ne tente pas d'en
+      // construire un. On interroge large (la vue courante), puis on restreint
+      // nous-mêmes au rectangle réellement demandé.
       const entities = c.history().intersects(c.map().extent()) as any[];
       const graph = c.graph();
       return entities
@@ -90,7 +108,8 @@ function buildBridge(c: any): IdBridge {
         .map(e => ({
           id: e.id as string,
           ring: (e.nodes as string[]).map(id => graph.entity(id).loc as LonLat),
-        }));
+        }))
+        .filter(b => ringOverlapsExtent(b.ring, extent));
     },
 
     nodesNear(pt: LonLat, radiusM: number): ExistingNode[] {
