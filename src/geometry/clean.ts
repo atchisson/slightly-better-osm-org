@@ -22,19 +22,27 @@ export function isDegenerate(ring: Ring): boolean {
   return Math.abs(ringArea(ring)) === 0;
 }
 
-export function dropCollinear(ring: Ring, toleranceM = 0.02): Ring {
-  const open = ring.slice(0, -1);
-  const kept: LonLat[] = [];
-  for (let i = 0; i < open.length; i++) {
-    const prev = kept.length > 0 ? kept[kept.length - 1]! : open[(i - 1 + open.length) % open.length]!;
-    const next = open[(i + 1) % open.length]!;
-    if (distanceToSegment(open[i]!, prev, next) > toleranceM) kept.push(open[i]!);
-  }
-  if (kept.length < 3) return ring;
-  return [...kept, kept[0]!];
-}
-
-export function simplify(ring: Ring, toleranceM = 0.2): Ring {
+/**
+ * Douglas-Peucker sur un anneau fermé : on l'ouvre, on l'ancre au sommet 0 et
+ * à celui le plus éloigné de 0 (le découpage en deux chaînes propre à un
+ * anneau qui n'a pas d'extrémité naturelle), puis on récurse normalement sur
+ * chaque chaîne. Garde-fou : ne redescend jamais sous un triangle, que ce
+ * soit avant même d'entrer en récursion (anneau déjà à 3 sommets) ou après
+ * (la récursion elle-même a fait tomber le nombre de sommets conservés
+ * sous 3).
+ *
+ * Implémentation unique, partagée par dropCollinear et simplify : les deux
+ * fonctions exportées ne diffèrent que par la tolérance qu'elles lui passent.
+ * Douglas-Peucker garantit par construction qu'aucun sommet supprimé ne se
+ * trouve jamais à plus de toleranceM de la ligne brisée conservée — une
+ * garantie qu'un test de colinéarité sommet-par-sommet ne peut pas offrir sur
+ * un anneau : une version antérieure de dropCollinear comparait chaque
+ * sommet à un repère (le dernier sommet conservé) qui dérivait au fil des
+ * suppressions, et pouvait ainsi laisser passer une bosse réelle de plusieurs
+ * mètres sans jamais la mesurer contre la vraie corde. Voir les tests de
+ * régression dans clean.test.ts.
+ */
+function douglasPeuckerRing(ring: Ring, toleranceM: number): Ring {
   const open = ring.slice(0, -1);
   if (open.length <= 3) return ring;
 
@@ -66,4 +74,30 @@ export function simplify(ring: Ring, toleranceM = 0.2): Ring {
   const kept = [...keep].sort((a, b) => a - b).map(i => open[i]!);
   if (kept.length < 3) return ring;
   return [...kept, kept[0]!];
+}
+
+/**
+ * Supprime les sommets laissés (quasi-)colinéaires par la couture de l'union
+ * topologique, à une tolérance volontairement petite (2 cm par défaut).
+ *
+ * Distincte de simplify, délibérément : dropCollinear nettoie un artefact de
+ * construction et doit s'exécuter même si l'appelant désactive la
+ * simplification proprement dite ; ne pas les fusionner en une seule
+ * fonction sous prétexte qu'elles appellent maintenant la même récursion.
+ */
+export function dropCollinear(ring: Ring, toleranceM = 0.02): Ring {
+  return douglasPeuckerRing(ring, toleranceM);
+}
+
+/**
+ * Réduit la précision excessive du cadastre par un Douglas-Peucker classique,
+ * à une tolérance bien en deçà de la précision cadastrale (20 cm par défaut).
+ *
+ * Distincte de dropCollinear, délibérément : simplify est une passe de
+ * simplification à part entière (perte de précision assumée), pas un
+ * nettoyage de couture ; ne pas les fusionner en une seule fonction sous
+ * prétexte qu'elles appellent maintenant la même récursion.
+ */
+export function simplify(ring: Ring, toleranceM = 0.2): Ring {
+  return douglasPeuckerRing(ring, toleranceM);
 }

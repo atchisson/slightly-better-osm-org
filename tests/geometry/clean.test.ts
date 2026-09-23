@@ -1,8 +1,51 @@
 import { describe, it, expect } from 'vitest';
 import { isDegenerate, dropCollinear, simplify } from '../../src/geometry/clean';
-import type { Ring } from '../../src/geometry/types';
+import type { LonLat, Ring } from '../../src/geometry/types';
 
 const ferme = (pts: Ring): Ring => [...pts, pts[0]!];
+
+const M_PER_DEG_LAT = 111320;
+
+/**
+ * Distance point-segment en mètres, réimplémentée indépendamment de
+ * src/geometry/clean.ts (même projection équirectangulaire, mais un calcul
+ * séparé) pour que le test ne valide pas l'implémentation contre elle-même.
+ */
+function distPointToSegment(p: LonLat, a: LonLat, b: LonLat): number {
+  const sx = Math.cos((a[1] * Math.PI) / 180);
+  const toXY = (q: LonLat): [number, number] => [q[0] * M_PER_DEG_LAT * sx, q[1] * M_PER_DEG_LAT];
+  const [px, py] = toXY(p);
+  const [ax, ay] = toXY(a);
+  const [bx, by] = toXY(b);
+  const dx = bx - ax, dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.hypot(px - ax, py - ay);
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+function distPointToRing(p: LonLat, ring: Ring): number {
+  let min = Infinity;
+  for (let i = 0; i < ring.length - 1; i++) {
+    const d = distPointToSegment(p, ring[i]!, ring[i + 1]!);
+    if (d < min) min = d;
+  }
+  return min;
+}
+
+/**
+ * Le contrat réel de dropCollinear/simplify : tout sommet supprimé doit
+ * rester à moins de toleranceM du contour conservé. C'est la garantie que
+ * Douglas-Peucker offre par construction, et qu'un test de colinéarité
+ * sommet-par-sommet contre un repère mobile ne peut pas garantir.
+ */
+function assertBoundedError(original: Ring, result: Ring, toleranceM: number): void {
+  const kept = new Set(result.map(p => `${p[0]},${p[1]}`));
+  for (const p of original.slice(0, -1)) {
+    if (kept.has(`${p[0]},${p[1]}`)) continue;
+    expect(distPointToRing(p, result)).toBeLessThanOrEqual(toleranceM + 1e-9);
+  }
+}
 
 describe('isDegenerate', () => {
   it('rejette un anneau de moins de trois sommets distincts', () => {
@@ -32,6 +75,42 @@ describe('dropCollinear', () => {
   it('rend un anneau toujours fermé', () => {
     const r = dropCollinear(ferme([[0, 0], [0.0005, 0], [0.001, 0], [0.001, 0.001], [0, 0.001]]));
     expect(r[0]).toEqual(r[r.length - 1]);
+  });
+
+  it('conserve le sommet d’une bosse réelle au milieu d’une rampe à plusieurs points', () => {
+    // Régression : deux sommets réels A et B à ~10 m l'un de l'autre, avec
+    // entre eux une rampe à 3 points (montée, sommet, descente) qui culmine
+    // à ~2,5 cm de la corde A-B réelle — au-delà de la tolérance par défaut
+    // (2 cm). Un troisième sommet C referme un triangle, loin de la rampe.
+    // Sous l'ancienne version de dropCollinear (repère = dernier sommet
+    // CONSERVÉ, qui dérivait à mesure que la rampe se vidait, plutôt que la
+    // vraie corde), ce sommet de bosse était effacé : mesuré contre le
+    // sommet suivant non encore traité (lui-même déjà décalé), il semblait
+    // localement aligné bien qu'il dévie de ~2,5 cm de la corde réelle.
+    const a: LonLat = [0, 0];
+    const montee: LonLat = [0.0000225, 0.0000001125];   // épaule, ~1,25 cm de la corde A-B
+    const sommet: LonLat = [0.000045, 0.000000225];     // sommet de la bosse, ~2,5 cm de la corde A-B
+    const descente: LonLat = [0.0000675, 0.0000001125]; // épaule, ~1,25 cm de la corde A-B
+    const b: LonLat = [0.00009, 0];
+    const c: LonLat = [0.000045, 0.0001];                // 3e sommet réel, referme le triangle
+    const rampe = ferme([a, montee, sommet, descente, b, c]);
+
+    const kept = new Set(dropCollinear(rampe).map(p => `${p[0]},${p[1]}`));
+    expect(kept.has(`${sommet[0]},${sommet[1]}`)).toBe(true);
+  });
+
+  it('ne supprime jamais un sommet à plus de la tolérance du contour résultant', () => {
+    const a: LonLat = [0, 0];
+    const montee: LonLat = [0.0000225, 0.0000001125];
+    const sommet: LonLat = [0.000045, 0.000000225];
+    const descente: LonLat = [0.0000675, 0.0000001125];
+    const b: LonLat = [0.00009, 0];
+    const c: LonLat = [0.000045, 0.0001];
+    const rampe = ferme([a, montee, sommet, descente, b, c]);
+    assertBoundedError(rampe, dropCollinear(rampe), 0.02);
+
+    const rectangle = ferme([[0, 0], [0.0005, 0], [0.001, 0], [0.001, 0.001], [0, 0.001]]);
+    assertBoundedError(rectangle, dropCollinear(rectangle), 0.02);
   });
 });
 
