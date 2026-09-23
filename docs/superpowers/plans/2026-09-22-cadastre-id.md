@@ -3035,7 +3035,7 @@ const MESSAGES: Record<AnyRefusal, string> = {
   'pincement': 'Le contour obtenu se pince sur lui-même : la fusion avec les constructions légères ne donne pas un tracé propre. À tracer à la main.',
   'trou': 'La fusion des constructions légères enferme une cour. Cette version ne crée pas de multipolygone. À tracer à la main.',
   'parties-multiples': 'La fusion donnerait plusieurs morceaux séparés. À tracer à la main.',
-  'vide': 'Le contour cadastre est vide.',
+  'vide': 'Aucun contour exploitable à cet endroit.',
   'batiment-existant': 'Un bâtiment OSM existe déjà ici : cette version ne remplace pas la géométrie existante.',
   'commune-introuvable': 'Commune introuvable ou hors couverture du cadastre français.',
   'reseau': 'Données cadastre indisponibles : vérifiez votre connexion.',
@@ -3228,7 +3228,6 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
     if (!dataset) return null;
     return composeAt(pt, {
       polys: dataset.polys,
-      edgeIndex: dataset.edgeIndex,
       absorption: dataset.absorption,
       byId: dataset.byId,              // precalcule en Task 12 ; jamais reconstruit par appel
       lightIndex: dataset.lightIndex,  // idem : sans lui, anchorOf balaie et les orphelines se tronquent
@@ -3243,7 +3242,8 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       if (enabled) return;
       enabled = true;
       overlay = createOverlay(bridge);
-      const centre = bridge.mapExtent()[0];
+      const [[x0, y0], [x1, y1]] = bridge.mapExtent();
+      const centre: LonLat = [(x0 + x1) / 2, (y0 + y1) / 2];
       void ensureDataset(centre);
     },
 
