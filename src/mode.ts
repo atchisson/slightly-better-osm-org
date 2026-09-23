@@ -77,7 +77,16 @@ async function defaultLoadDataset(pt: LonLat): Promise<Dataset> {
   const cached = await readCache(commune.code);
   if (cached) return buildDataset(cached.insee, cached.millesime, cached.features);
   const { features, millesime } = await downloadCommune(commune.code);
-  await writeCache({ insee: commune.code, millesime, fetchedAt: Date.now(), features });
+  // Le cache est un confort, jamais une condition du chargement : il est délibérément
+  // HORS du chemin de retour. `await writeCache(...)` faisait échouer tout le
+  // chargement APRÈS un téléchargement réussi si IndexedDB refusait l'écriture — un
+  // dépassement de quota, vraisemblable sur Paris ou Marseille et leur centaine de Mo
+  // de features sérialisées — et la personne lisait alors « vérifiez votre connexion »
+  // alors que le réseau avait parfaitement fonctionné.
+  void writeCache({ insee: commune.code, millesime, fetchedAt: Date.now(), features })
+    .catch(err => console.warn(
+      '[cadastre-id] mise en cache impossible (les données restent utilisables, elles seront ' +
+      'retéléchargées à la prochaine session) :', err));
   return buildDataset(commune.code, millesime, features);
 }
 

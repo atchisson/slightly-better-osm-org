@@ -8,6 +8,20 @@ export interface CachedCommune {
 const DB = 'cadastre-id';
 const STORE = 'communes';
 
+/**
+ * Durée de validité d'une commune en cache.
+ *
+ * `fetchedAt` était écrit et relu par personne : une commune mise en cache aujourd'hui
+ * aurait resservi le même millésime dans deux ans, et le tag `source` l'aurait annoncé
+ * fidèlement — de la donnée périmée importée en toute bonne foi, ce que la Licence
+ * Ouverte et le régime d'import semi-automatique interdisent tous deux en pratique.
+ *
+ * 30 jours : Etalab republie le PCI plusieurs fois par an, donc c'est court devant le
+ * rythme de publication, et long devant une session de contribution — le cache garde
+ * tout son intérêt (ne pas retélécharger 20 Mo à chaque ouverture de l'éditeur).
+ */
+export const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB, 1);
@@ -30,9 +44,22 @@ function run<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<
   }));
 }
 
-export async function readCache(insee: string): Promise<CachedCommune | null> {
+/**
+ * Rend l'entrée en cache si elle existe ET n'est pas périmée.
+ *
+ * Une entrée périmée n'est pas supprimée : la clé est l'INSEE, donc le prochain
+ * `writeCache` l'écrase de toute façon. Pas de suppression, pas de chemin d'écriture
+ * supplémentaire à faire échouer sur une lecture.
+ */
+export async function readCache(
+  insee: string,
+  now: number = Date.now(),
+): Promise<CachedCommune | null> {
   const got = await run<CachedCommune | undefined>('readonly', s => s.get(insee));
-  return got ?? null;
+  if (!got) return null;
+  const age = now - (got.fetchedAt ?? 0);
+  if (!Number.isFinite(age) || age < 0 || age > CACHE_TTL_MS) return null;
+  return got;
 }
 
 export async function writeCache(entry: CachedCommune): Promise<void> {

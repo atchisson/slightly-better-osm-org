@@ -63,6 +63,10 @@ Faits mesurés qui pilotent la conception :
 
 Un fichier commune est téléchargé une fois, puis conservé en IndexedDB avec son millésime et sa date de récupération. Rechargement quand la carte change de commune.
 
+**L'entrée en cache se périme au bout de 30 jours** (corrigé le 2026-09-23, à la revue de branche : la date de récupération était écrite et relue par personne). Sans péremption, une commune mise en cache aujourd'hui resservirait le même millésime dans deux ans, et le tag `source` l'annoncerait fidèlement — de la donnée périmée importée en toute bonne foi. 30 jours est court devant le rythme de publication d'Etalab et long devant une session de contribution.
+
+**L'écriture du cache n'est jamais sur le chemin critique** (même correction) : un refus d'IndexedDB — dépassement de quota, vraisemblable sur Paris ou Marseille — faisait échouer le chargement *après* un téléchargement réussi, en affichant « vérifiez votre connexion ». Le cache est un confort ; il ne doit jamais faire échouer la fonctionnalité.
+
 Les polygones sont indexés dans une grille spatiale à l'ingestion.
 
 > **Corrigé le 2026-09-23, par la mesure.** Cette section prescrivait une forme compacte — bbox et anneaux en `Float64Array` — au motif que 50 000 géométries parsées coûteraient trop cher. **C'était faux.** Ventilation réelle de ce que retenait le jeu de données d'Angers avant correction :
