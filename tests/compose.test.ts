@@ -2,15 +2,30 @@ import { describe, it, expect, vi } from 'vitest';
 import { buildEdgeIndex } from '../src/geometry/edges';
 import { lightComponents, absorptionMap } from '../src/geometry/components';
 import { composeAt, composeFor } from '../src/compose';
-import type { Poly } from '../src/geometry/types';
+import type { ComposeInput } from '../src/compose';
+import type { LonLat, Poly } from '../src/geometry/types';
 import fixtures from './fixtures/angers.json';
 
 const rect = (id: number, type: Poly['type'], x0: number, y0: number, x1: number, y1: number): Poly =>
   ({ id, type, holes: [], outer: [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]] });
 
-const prepare = (polys: Poly[]) => {
+// byId et lightIndex sont, en production, construits une fois par commune (voir la revue
+// de tâche 8) — ici on les recalcule à chaque prepare() par simplicité de test, ce qui
+// reste largement acceptable au vu de la taille des fixtures.
+const prepare = (polys: Poly[]): ComposeInput => {
   const edgeIndex = buildEdgeIndex(polys);
-  return { polys, edgeIndex, absorption: absorptionMap(lightComponents(polys, edgeIndex)) };
+  const components = lightComponents(polys, edgeIndex);
+  const lightIndex = new Map<number, { ownerId: number | null; members: number[] }>();
+  for (const c of components) {
+    for (const id of c.members) lightIndex.set(id, { ownerId: c.ownerId, members: c.members });
+  }
+  return {
+    polys,
+    edgeIndex,
+    absorption: absorptionMap(components),
+    byId: new Map(polys.map(p => [p.id, p])),
+    lightIndex,
+  };
 };
 
 describe('composeAt', () => {
@@ -109,10 +124,80 @@ describe('composeAt', () => {
   });
 
   it('utilise l’index spatial quand on le lui fournit', () => {
+    // Le point visé est délibérément hors de tout polygone réel : le balayage linéaire de
+    // secours ne trouverait rien ici. Si le résultat est néanmoins ok:true, c'est la preuve
+    // que composeAt a vraiment consommé le retour de polyAt plutôt que de retomber sur le
+    // balayage en l'ignorant — un mutant qui appellerait polyAt puis balaierait quand même
+    // aurait échoué ici (l'ancien point, à l'intérieur du seul polygone, ne le distinguait pas).
     const polys = [rect(0, '01', 0, 0, 0.001, 0.001)];
+    const dehors: LonLat = [5, 5];
     const polyAt = vi.fn().mockReturnValue(polys[0]);
-    const r = composeAt([0.0005, 0.0005], { ...prepare(polys), polyAt });
-    expect(polyAt).toHaveBeenCalledOnce();
+    const r = composeAt(dehors, { ...prepare(polys), polyAt });
+    expect(polyAt).toHaveBeenCalledWith(dehors);
     expect(r.ok).toBe(true);
+    if (r.ok) expect(r.anchorId).toBe(0);
+  });
+});
+
+describe('composantes légères orphelines (aucun dur adjacent, spec §5 étape 2)', () => {
+  it('fusionne une composante orpheline à deux membres, quel que soit le membre cliqué', () => {
+    const polys = [
+      rect(0, '02', 0, 0, 0.001, 0.001),
+      rect(1, '02', 0.001, 0, 0.002, 0.001),
+    ];
+    const input = prepare(polys);
+    const r = composeAt([0.0005, 0.0005], input);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.isolatedLight).toBe(true);
+      expect(r.anchorId).toBe(0);
+      expect(r.absorbed).toEqual([1]);
+      const xs = r.ring.map(p => p[0]);
+      expect(Math.min(...xs)).toBeCloseTo(0, 10);
+      expect(Math.max(...xs)).toBeCloseTo(0.002, 10);
+    }
+  });
+
+  it('résout à la même ancre qu’on clique le premier ou le second membre de la composante', () => {
+    const polys = [
+      rect(0, '02', 0, 0, 0.001, 0.001),
+      rect(1, '02', 0.001, 0, 0.002, 0.001),
+    ];
+    const input = prepare(polys);
+    const parPremier = composeAt([0.0005, 0.0005], input);
+    const parSecond = composeAt([0.0015, 0.0005], input);
+    expect(parSecond).toEqual(parPremier);
+  });
+
+  it('fusionne une chaîne orpheline de trois légers en une seule composition (pas pairwise)', () => {
+    // Cliquer le troisième membre doit résoudre à l'ancre canonique (le plus petit id, 0)
+    // et absorber les DEUX autres — une implémentation qui ne fusionnerait que des paires
+    // adjacentes laisserait échapper le membre 0 ou renverrait une ancre différente d'un
+    // membre à l'autre.
+    const polys = [
+      rect(0, '02', 0, 0, 0.001, 0.001),
+      rect(1, '02', 0.001, 0, 0.002, 0.001),
+      rect(2, '02', 0.002, 0, 0.003, 0.001),
+    ];
+    const input = prepare(polys);
+    const r = composeAt([0.0025, 0.0005], input);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.anchorId).toBe(0);
+      expect(r.absorbed).toEqual([1, 2]);
+      expect(r.isolatedLight).toBe(true);
+      expect(Math.max(...r.ring.map(p => p[0]))).toBeCloseTo(0.003, 10);
+    }
+  });
+
+  it('une composante orpheline à un seul membre reste une construction légère isolée', () => {
+    const input = prepare([rect(0, '02', 0, 0, 0.001, 0.001)]);
+    const r = composeAt([0.0005, 0.0005], input);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.isolatedLight).toBe(true);
+      expect(r.anchorId).toBe(0);
+      expect(r.absorbed).toEqual([]);
+    }
   });
 });
