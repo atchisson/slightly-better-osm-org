@@ -413,7 +413,7 @@ const CAS = [
   'rangeeMitoyenne',    // durs mitoyens, ne doivent jamais fusionner
   'chaineLegers',       // composante de plusieurs légers
   'avecTrou',           // géométrie source à trou
-  'degenere',           // surface nulle
+  'minuscule',          // le plus petit bâtiment réel du fichier (~0,02 m²)
   'legerIsole',         // léger sans dur adjacent
 ] as const;
 
@@ -499,10 +499,17 @@ const porche = trouve(i => T(i) === '02' && voisins(i).filter(j => T(j) === '01'
 const rangee = trouve(i => T(i) === '01' && voisins(i).filter(j => T(j) === '01').length >= 2);
 const chaine = trouve(i => T(i) === '02' && voisins(i).filter(j => T(j) === '02').length >= 1);
 const trou   = trouve(i => poly(i).length > 1);
-const degen  = trouve(i => aire(poly(i)[0]) === 0);
 const isole  = trouve(i => T(i) === '02' && voisins(i).length === 0);
 
-for (const [nom, i] of Object.entries({ porche, rangee, chaine, trou, degen, isole }))
+// Le plus petit bâtiment réel du fichier. Il n'existe AUCUN polygone d'aire exactement
+// nulle ni à moins de trois sommets distincts dans ce jeu — vérifié sur les 50 740
+// entités d'Angers. La dégénérescence est donc une garde défensive (autres communes,
+// sortie de l'union ou de la simplification), pas un cas observable ici : elle se teste
+// sur des anneaux synthétiques, en Task 7 et Task 8.
+let mini = 0;
+for (let i = 1; i < feats.length; i++) if (aire(poly(i)[0]) < aire(poly(mini)[0])) mini = i;
+
+for (const [nom, i] of Object.entries({ porche, rangee, chaine, trou, isole }))
   if (i < 0) throw new Error(`cas introuvable : ${nom}`);
 
 writeFileSync('tests/fixtures/angers.json', JSON.stringify({
@@ -510,7 +517,7 @@ writeFileSync('tests/fixtures/angers.json', JSON.stringify({
   rangeeMitoyenne: groupe(rangee, 'bâtiments en dur mitoyens'),
   chaineLegers:    groupe(chaine, 'chaîne de constructions légères'),
   avecTrou:        groupe(trou,   'géométrie source à trou'),
-  degenere:        { label: 'polygone de surface nulle', anchorId: degen, polys: [toPoly(degen)] },
+  minuscule:       { label: 'le plus petit bâtiment réel du fichier', anchorId: mini, polys: [toPoly(mini)] },
   legerIsole:      { label: 'construction légère isolée', anchorId: isole, polys: [toPoly(isole)] },
 }, null, 1));
 
@@ -1428,9 +1435,19 @@ describe('composeAt', () => {
     expect(composeFor(troue.id, prepare(polys))).toEqual({ ok: false, reason: 'trou-source' });
   });
 
-  it('refuse un polygone dégénéré', () => {
-    const polys = fixtures.degenere.polys as Poly[];
-    expect(composeFor(polys[0]!.id, prepare(polys))).toEqual({ ok: false, reason: 'degenere' });
+  it('refuse un anneau dégénéré', () => {
+    // Anneau synthétique : il n'existe aucun polygone d'aire nulle dans les données
+    // réelles. La garde protège contre les autres communes et contre une sortie
+    // d'union ou de simplification dégradée.
+    const plat: Poly = { id: 0, type: '01', holes: [], outer: [[0, 0], [0.001, 0], [0.002, 0], [0, 0]] };
+    expect(composeFor(0, prepare([plat]))).toEqual({ ok: false, reason: 'degenere' });
+  });
+
+  it('accepte le plus petit bâtiment réel du fichier', () => {
+    // ~0,02 m² : absurde comme bâtiment, mais géométriquement valide. La garde de
+    // dégénérescence ne doit pas le rejeter — sinon elle rejetterait du bâti réel.
+    const polys = fixtures.minuscule.polys as Poly[];
+    expect(composeFor(polys[0]!.id, prepare(polys)).ok).toBe(true);
   });
 
   it('utilise l’index spatial quand on le lui fournit', () => {
@@ -1526,7 +1543,7 @@ export function composeAt(pt: LonLat, input: ComposeInput): Composition {
 - [ ] **Step 4: Lancer les tests pour les voir passer**
 
 Run: `npx vitest run tests/compose.test.ts`
-Expected: PASS, 8 tests.
+Expected: PASS, 9 tests.
 
 - [ ] **Step 5: Commit**
 

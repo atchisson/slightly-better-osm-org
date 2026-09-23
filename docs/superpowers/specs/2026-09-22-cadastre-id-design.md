@@ -56,7 +56,7 @@ Faits mesurés qui pilotent la conception :
 - **26 539 bâtiments en dur sont mitoyens d'un autre bâtiment en dur (70,3 %).** Fusionner deux `01` serait donc massivement destructeur. Interdit.
 - Parmi les `02` : 3 111 isolés (24 %), 7 718 touchant exactement un `01` (60 %), **2 063 touchant au moins deux bâtiments en dur (16 %)**, 1 813 touchant un autre `02`.
 - Les 89 `03` sont tous isolés et tous créés entre 2025-12-22 et 2026-04-06.
-- Des polygones de surface nulle existent dans les trois catégories.
+- **Aucun polygone dégénéré.** Corrigé le 2026-09-23 : une première lecture, faussée par un arrondi à l'entier, annonçait des surfaces nulles. Vérification faite, il n'existe dans ce jeu ni polygone d'aire exactement nulle, ni polygone à moins de trois sommets distincts. La plus petite aire réelle vaut environ 0,02 m². La garde contre la dégénérescence reste utile — autres communes, sortie d'union ou de simplification — mais elle se teste sur des anneaux synthétiques, pas sur ces données.
 - 34 entités seulement portent un `nom` sur 50 740.
 
 ### 3.3 Cache
@@ -204,8 +204,10 @@ Chacun avec son message, et sans jamais laisser de géométrie à moitié créé
 - une rangée de bâtiments en dur mitoyens, qui ne doivent jamais fusionner
 - une chaîne de constructions légères
 - une géométrie à trou
-- un polygone dégénéré
+- le plus petit bâtiment réel du fichier, qui doit être accepté et non pris pour dégénéré
 - une construction légère isolée
+
+La dégénérescence, elle, se teste sur des anneaux synthétiques : les données réelles n'en contiennent aucun.
 
 Les règles d'union, le départage par plus longue frontière, le traitement par composante et la tolérance de recalage sont exactement le genre de logique qui se casse en silence : c'est là que les tests paient.
 
