@@ -1764,10 +1764,12 @@ Expected: FAIL — module introuvable.
 ```ts
 export interface Commune { code: string; nom: string; }
 
-const ARRONDISSEMENTS: Record<string, { prefix: string; count: number }> = {
-  '75056': { prefix: '751', count: 20 },   // Paris
-  '69123': { prefix: '693', count: 9 },    // Lyon
-  '13055': { prefix: '132', count: 16 },   // Marseille
+// Codes vérifiés contre le jeu Etalab vivant le 2026-09-23.
+// Piège : les arrondissements de Lyon ne sont PAS contigus à son code commune.
+const ARRONDISSEMENTS: Record<string, { first: number; count: number }> = {
+  '75056': { first: 75101, count: 20 },   // Paris
+  '69123': { first: 69381, count: 9 },    // Lyon
+  '13055': { first: 13201, count: 16 },   // Marseille
 };
 
 export function departementOf(insee: string): string {
@@ -1779,8 +1781,7 @@ export function departementOf(insee: string): string {
 export function arrondissementCodes(insee: string): string[] {
   const split = ARRONDISSEMENTS[insee];
   if (!split) return [insee];
-  return Array.from({ length: split.count }, (_, i) =>
-    `${split.prefix}${String(i + 1).padStart(2, '0')}`);
+  return Array.from({ length: split.count }, (_, i) => String(split.first + i));
 }
 
 export async function communeAt(
