@@ -23,6 +23,37 @@ describe('captureContext', () => {
     (globalThis as any).iD = ns;
     expect((globalThis as any).iD.version).toBe('2.30.0');
   });
+
+  // Reproduit précisément la condition qui a cassé l'éditeur au premier passage du
+  // spike : coreContext est un accesseur SANS setter (ce que produisent les bundlers).
+  // La première sonde faisait `v.coreContext = wrapper`, ce qui lève une TypeError en
+  // mode strict — et cette levée remontait depuis le setter de window.iD. Ce test
+  // affecte ce namespace exact à window.iD et exige que l'affectation elle-même ne
+  // lève jamais.
+  it('n’écrit jamais sur coreContext, même quand il est un accesseur sans setter', () => {
+    captureContext();
+    const ns: any = {};
+    Object.defineProperty(ns, 'coreContext', {
+      configurable: true,
+      enumerable: true,
+      get: () => () => ({ ok: true }),
+      // pas de `set` : toute écriture directe lève TypeError en mode strict (ESM).
+    });
+    expect(() => { (globalThis as any).iD = ns; }).not.toThrow();
+  });
+
+  // Le Proxy ne doit ni avaler ni amplifier une erreur préexistante ailleurs dans le
+  // namespace : l'affectation à window.iD doit rester silencieuse, mais lire ensuite
+  // la propriété fautive doit se comporter exactement comme sans piège.
+  it('une propriété qui lève à la lecture ne lève jamais à l’affectation de window.iD', () => {
+    captureContext();
+    const ns = {
+      coreContext: () => ({}),
+      get piege(): unknown { throw new Error('propriété défaillante'); },
+    };
+    expect(() => { (globalThis as any).iD = ns; }).not.toThrow();
+    expect(() => (globalThis as any).iD.piege).toThrow(/propriété défaillante/);
+  });
 });
 
 describe('makeBridge', () => {
