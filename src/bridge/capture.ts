@@ -76,6 +76,47 @@ function ringOverlapsExtent(ring: Ring, extent: [LonLat, LonLat]): boolean {
 }
 
 function buildBridge(c: any): IdBridge {
+  // Cache des bâtiments existants de la vue courante.
+  //
+  // Mesuré sur un contexte synthétique dimensionné comme la vue réelle du spike
+  // (24 611 entités) : reconstruire cette liste à chaque appel de buildingsNear coûte,
+  // selon la composition retenue, jusqu'à ~14 ms au pire appel — trop près du budget de
+  // 16 ms par frame, sachant que buildingsNear est appelé par requestAnimationFrame
+  // depuis hoverAt (une fois par mouvement de souris). D'où le cache.
+  //
+  // Invalidé :
+  //  - au déplacement de la carte, sur l'événement 'move' de map() (primitive déjà
+  //    utilisée par onMapMove, donc déjà supposée disponible par la conception
+  //    d'origine — ceci n'ajoute pas de nouvelle hypothèse non vérifiée) ;
+  //  - après un perform() déclenché par NOTRE PROPRE createBuilding, seul endroit où ce
+  //    bridge modifie le graphe lui-même.
+  //
+  // PAS invalidé : une modification du graphe faite par ailleurs dans iD pendant que
+  // notre greffon est actif (l'utilisatrice déplace un nœud existant, dessine un autre
+  // bâtiment à la main, annule/rétablit...). Le contexte capturé n'expose aucun signal
+  // vérifié de changement de graphe — le spike n'a pas confirmé de `history().on(...)`
+  // ou équivalent, et en inventer un serait pire qu'assumer cette limite : le survol
+  // peut, dans cette fenêtre étroite, ignorer un bâtiment tout juste modifié ailleurs,
+  // jusqu'au prochain déplacement de carte.
+  let buildingCache: ExistingBuilding[] | null = null;
+
+  const allBuildings = (): ExistingBuilding[] => {
+    if (buildingCache) return buildingCache;
+    const entities = c.history().intersects(c.map().extent()) as any[];
+    const graph = c.graph();
+    buildingCache = entities
+      .filter(e => e.type === 'way' && e.tags?.building)
+      .map(e => ({
+        id: e.id as string,
+        ring: (e.nodes as string[]).map(id => graph.entity(id).loc as LonLat),
+      }));
+    return buildingCache;
+  };
+
+  // Espace de nom distinct de celui utilisé par onMapMove ('move.cadastre-id') : les
+  // deux doivent coexister sans se remplacer l'un l'autre.
+  c.map().on('move.cadastre-id-cache', () => { buildingCache = null; });
+
   return {
     mapExtent(): [LonLat, LonLat] {
       const r = c.map().extent().rectangle() as number[];
@@ -96,20 +137,7 @@ function buildBridge(c: any): IdBridge {
     },
 
     buildingsNear(extent: [LonLat, LonLat]): ExistingBuilding[] {
-      // `history().intersects()` attend un objet Extent d'iD (celui que rend
-      // `map().extent()`), pas le simple tuple [LonLat, LonLat] de l'interface :
-      // `geoExtent` n'a pas été vérifié par le spike, donc on ne tente pas d'en
-      // construire un. On interroge large (la vue courante), puis on restreint
-      // nous-mêmes au rectangle réellement demandé.
-      const entities = c.history().intersects(c.map().extent()) as any[];
-      const graph = c.graph();
-      return entities
-        .filter(e => e.type === 'way' && e.tags?.building)
-        .map(e => ({
-          id: e.id as string,
-          ring: (e.nodes as string[]).map(id => graph.entity(id).loc as LonLat),
-        }))
-        .filter(b => ringOverlapsExtent(b.ring, extent));
+      return allBuildings().filter(b => ringOverlapsExtent(b.ring, extent));
     },
 
     nodesNear(pt: LonLat, radiusM: number): ExistingNode[] {
@@ -138,6 +166,7 @@ function buildBridge(c: any): IdBridge {
       const way = iD.osmWay({ tags, nodes: [...nodeIds, nodeIds[0]!] });
       const actions = [...created, way].map(entity => iD.actionAddEntity(entity));
       c.perform(...actions, 'Bâtiment depuis le cadastre');
+      buildingCache = null; // notre propre modification du graphe invalide le cache
       c.enter(iD.modeSelect(c, [way.id]));
     },
 

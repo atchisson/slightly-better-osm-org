@@ -121,3 +121,87 @@ describe('buildingsNear', () => {
     expect(result.map(b => b.id)).toEqual(['w1']);
   });
 });
+
+describe('cache de buildingsNear', () => {
+  // Mesuré sur un contexte synthétique dimensionné comme la vue réelle du spike
+  // (24 611 entités, ~2 000 bâtiments) : buildingsNear() sans cache atteint
+  // ponctuellement ~14 ms sur un budget de 16 ms par frame (rAF depuis hoverAt).
+  // Ces tests verrouillent le mécanisme de cache qui évite de reconstruire la liste
+  // des bâtiments à chaque appel.
+  const nodes: Record<string, { loc: [number, number] }> = {
+    a: { loc: [0, 0] }, b: { loc: [1, 0] }, c: { loc: [1, 1] }, d: { loc: [0, 1] },
+  };
+
+  const ctxAvecCompteur = (entities: any[]) => {
+    const ecouteurs: Record<string, () => void> = {};
+    let appelsIntersects = 0;
+    const ctx = {
+      map: () => ({
+        extent: () => ({ rectangle: () => [-90, -90, 90, 90] }),
+        on: (type: string, cb: () => void) => { ecouteurs[type] = cb; },
+        off: (type: string) => { delete ecouteurs[type]; },
+      }),
+      history: () => ({ intersects: () => { appelsIntersects++; return entities; } }),
+      graph: () => ({ entity: (id: string) => nodes[id] }),
+      projection: Object.assign((p: unknown) => p, { invert: (p: unknown) => p }),
+      perform: () => {},
+      enter: () => {},
+      container: () => ({}),
+    };
+    return {
+      ctx,
+      appels: () => appelsIntersects,
+      declencherDeplacement: () => { for (const k of Object.keys(ecouteurs)) if (k.startsWith('move')) ecouteurs[k]!(); },
+    };
+  };
+
+  const batiment = { type: 'way', id: 'w1', tags: { building: 'yes' }, nodes: ['a', 'b', 'c', 'd', 'a'] };
+  const vueEntiere: [[number, number], [number, number]] = [[-1, -1], [2, 2]];
+
+  it('ne réinterroge pas history().intersects() à chaque appel tant que la vue ne bouge pas', () => {
+    const { ctx, appels } = ctxAvecCompteur([batiment]);
+    const bridge = makeBridge(ctx);
+
+    bridge.buildingsNear(vueEntiere);
+    bridge.buildingsNear(vueEntiere);
+    bridge.buildingsNear(vueEntiere);
+
+    expect(appels()).toBe(1);
+  });
+
+  it('reconstruit le cache quand la carte se déplace', () => {
+    const { ctx, appels, declencherDeplacement } = ctxAvecCompteur([batiment]);
+    const bridge = makeBridge(ctx);
+
+    bridge.buildingsNear(vueEntiere);
+    declencherDeplacement();
+    bridge.buildingsNear(vueEntiere);
+
+    expect(appels()).toBe(2);
+  });
+
+  it('reconstruit le cache après createBuilding, pour voir le bâtiment qu’il vient de créer', () => {
+    const { ctx, appels } = ctxAvecCompteur([batiment]);
+    const bridge = makeBridge(ctx);
+    (globalThis as any).iD = {
+      osmNode: (props: any) => ({ id: 'n_nouveau', ...props }),
+      osmWay: (props: any) => ({ id: 'w_nouveau', ...props }),
+      actionAddEntity: (e: any) => e,
+      modeSelect: () => ({}),
+    };
+
+    try {
+      bridge.buildingsNear(vueEntiere);
+      bridge.createBuilding(
+        [[5, 5], [6, 5], [6, 6], [5, 6], [5, 5]],
+        { building: 'yes' },
+        [null, null, null, null],
+      );
+      bridge.buildingsNear(vueEntiere);
+
+      expect(appels()).toBe(2);
+    } finally {
+      delete (globalThis as any).iD;
+    }
+  });
+});
