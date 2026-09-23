@@ -5,7 +5,7 @@ import type { IdBridge } from '../src/bridge/types';
 import { buildDataset, type Dataset } from '../src/cadastre/dataset';
 import { composeAt } from '../src/compose';
 import { segmentLength } from '../src/geometry/edges';
-import { DEFAULT_SNAP_TOLERANCE_M } from '../src/conflation/snap';
+import { DEFAULT_SNAP_TOLERANCE_M, type ExistingNode } from '../src/conflation/snap';
 import type { LonLat } from '../src/geometry/types';
 
 const feature = (type: string, ring: number[][]) => ({
@@ -56,7 +56,7 @@ describe('mode cadastre', () => {
       invert: p => [p[0] / 1000, p[1] / 1000],
       onMapMove: () => () => {},
       buildingsNear: () => [],
-      nodesNear: () => [],
+      nodesIn: () => [],
       createBuilding: (ring, tags) => { created.push({ ring, tags }); },
       prefillChangeset: vi.fn(),
       containerNode: () => container,
@@ -266,7 +266,7 @@ describe('mode cadastre', () => {
     // de la tolérance de recalage (0,2 m). snapToExistingNodes va donc déplacer CE
     // sommet-là au clic, sans toucher à la composition.
     const premierSommet = attendu.ring[0]!;
-    bridge.nodesNear = () => [{ id: 'n1', loc: [premierSommet[0] + 0.000001, premierSommet[1]] as LonLat }];
+    bridge.nodesIn = () => [{ id: 'n1', loc: [premierSommet[0] + 0.000001, premierSommet[1]] as LonLat }];
 
     const d = deps();
     const mode = createMode(bridge, d);
@@ -569,7 +569,7 @@ describe('mode cadastre — commune introuvable vs réseau (defaultLoadDataset)'
       invert: p => [p[0] / 1000, p[1] / 1000],
       onMapMove: () => () => {},
       buildingsNear: () => [],
-      nodesNear: () => [],
+      nodesIn: () => [],
       createBuilding: () => {},
       prefillChangeset: vi.fn(),
       containerNode: () => container,
@@ -602,5 +602,68 @@ describe('mode cadastre — commune introuvable vs réseau (defaultLoadDataset)'
 
     expect(notify).toHaveBeenCalledWith(expect.stringMatching(/connexion/i));
     expect(notify).not.toHaveBeenCalledWith(expect.stringMatching(/hors couverture/i));
+  });
+});
+
+// --- C1 : la réutilisation des nœuds ne se déclenchait pratiquement jamais ---
+//
+// `nodesNear(pt, radiusM)` filtrait les candidats dans une boîte centrée sur le POINT
+// CLIQUÉ, et mode.ts l'appelait avec 2 m. À 47,5° N cette boîte vaut ±4,00 m en
+// latitude mais ±2,70 m en longitude, alors que les coins d'une maison médiane
+// d'Angers (83 m², ~9,1 m de côté) sont à 4,56 m du centre sur chaque axe. Cliquer le
+// milieu d'une maison ordinaire ne ramenait donc AUCUN candidat, et
+// snapToExistingNodes ne recousait rien — en silence, sur les 70 % de bâti mitoyen que
+// la spec §2 donne comme motif de cette décision.
+//
+// Le double de bridge ci-dessous filtre réellement sur l'étendue demandée : c'est ce
+// qui rend ce test capable d'échouer. Un double qui rendrait ses nœuds quoi qu'on lui
+// demande (comme tous les autres de ce fichier) ne prouverait rien sur la requête.
+describe('mode cadastre — réutilisation des nœuds sur un bâtiment de taille réelle', () => {
+  const LAT = 47.5;                                  // Angers
+  const COS = Math.cos((LAT * Math.PI) / 180);
+  const COTE_M = 9.1;                                // ~83 m², la médiane mesurée d'Angers
+  const D_LAT = COTE_M / 111320;
+  const D_LON = COTE_M / (111320 * COS);
+
+  const maisonMediane = () => feature('01', [
+    [0, LAT], [D_LON, LAT], [D_LON, LAT + D_LAT], [0, LAT + D_LAT], [0, LAT],
+  ]);
+
+  it('réutilise un nœud posé sur un coin, alors que le clic vise le milieu', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const cree: { reused: (string | null)[] }[] = [];
+
+    // Un nœud OSM existant exactement sur le coin sud-ouest : le cas du mur mitoyen
+    // déjà importé, celui que la spec §5 étape 8 demande de recoudre.
+    const noeuds: ExistingNode[] = [{ id: 'n1', loc: [0, LAT] }];
+
+    const bridge: IdBridge = {
+      mapExtent: () => [[-1, LAT - 1], [1, LAT + 1]],
+      project: p => [p[0] * 1000, p[1] * 1000],
+      invert: p => [p[0] / 1000, p[1] / 1000],
+      onMapMove: () => () => {},
+      buildingsNear: () => [],
+      // Double fidèle : ne rend QUE les nœuds réellement dans l'étendue demandée.
+      nodesIn: ([[minLon, minLat], [maxLon, maxLat]]) => noeuds.filter(n =>
+        n.loc[0] >= minLon && n.loc[0] <= maxLon &&
+        n.loc[1] >= minLat && n.loc[1] <= maxLat),
+      createBuilding: (_ring, _tags, reused) => { cree.push({ reused }); },
+      prefillChangeset: vi.fn(),
+      containerNode: () => container,
+    };
+
+    const mode = createMode(bridge, {
+      loadDataset: async () => buildDataset('49007', '2026', [maisonMediane()]),
+      communeName: async () => 'Angers',
+      notify: vi.fn(),
+    });
+
+    mode.enable();
+    await mode.whenReady();
+    await mode.clickAt([D_LON / 2, LAT + D_LAT / 2]);   // le milieu de la maison
+
+    expect(cree).toHaveLength(1);
+    expect(cree[0]!.reused).toContain('n1');
   });
 });

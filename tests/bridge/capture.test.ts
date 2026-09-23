@@ -480,3 +480,65 @@ describe('onMapMove — plusieurs abonnements sur le même bridge', () => {
     expect(appelsB).toBe(1);
   });
 });
+
+describe('nodesIn — éligibilité des nœuds au recalage', () => {
+  // Spec §5 étape 8 : « recaler chaque sommet sur un nœud OSM existant ». L'intention
+  // est de recoudre un coin de BÂTIMENT voisin. `nodesNear` ne filtrait rien : un nœud
+  // taggué (une adresse, un arbre, du mobilier urbain) ou un sommet de voirie pouvait
+  // devenir un sommet du bâtiment créé — ce qui change de fait un objet existant, la
+  // seule chose que la v1 promet de ne jamais faire.
+  const ctx = (entities: any[]) => ({
+    map: () => ({ extent: () => ({ rectangle: () => [-90, -90, 90, 90] }), on: () => {}, off: () => {} }),
+    history: () => ({ intersects: () => entities }),
+    graph: () => ({ entity: (id: string) => entities.find(e => e.id === id) }),
+    projection: Object.assign((p: unknown) => p, { invert: (p: unknown) => p }),
+    perform: () => {},
+    enter: () => {},
+    container: () => ({ node: () => document.createElement('div') }),
+  });
+  const partout: [[number, number], [number, number]] = [[-1, -1], [1, 1]];
+
+  it('écarte un nœud taggué qui n’appartient à aucun bâtiment', () => {
+    const banc = { type: 'node', id: 'n_banc', loc: [0, 0], tags: { amenity: 'bench' } };
+    const nu = { type: 'node', id: 'n_nu', loc: [0, 0] };
+    const bridge = makeBridge(ctx([banc, nu]));
+
+    expect(bridge.nodesIn(partout).map(n => n.id)).toEqual(['n_nu']);
+  });
+
+  it('accepte un nœud taggué s’il est sommet d’une way bâtiment', () => {
+    const coin = { type: 'node', id: 'n_coin', loc: [0, 0], tags: { 'addr:housenumber': '12' } };
+    const way = { type: 'way', id: 'w1', tags: { building: 'yes' }, nodes: ['n_coin'] };
+    const bridge = makeBridge(ctx([coin, way]));
+
+    expect(bridge.nodesIn(partout).map(n => n.id)).toEqual(['n_coin']);
+  });
+
+  it('accepte un nœud sommet d’une way membre d’une relation bâtiment', () => {
+    const coin = { type: 'node', id: 'n_coin', loc: [0, 0], tags: { 'addr:housenumber': '12' } };
+    const way = { type: 'way', id: 'w1', nodes: ['n_coin'] };
+    const rel = {
+      type: 'relation', id: 'r1', tags: { type: 'multipolygon', building: 'yes' },
+      members: [{ type: 'way', id: 'w1', role: 'outer' }],
+    };
+    const bridge = makeBridge(ctx([coin, way, rel]));
+
+    expect(bridge.nodesIn(partout).map(n => n.id)).toEqual(['n_coin']);
+  });
+
+  it('écarte un sommet de voirie, même nu : un bâtiment ne se raccroche pas à une route', () => {
+    const sommetRoute = { type: 'node', id: 'n_route', loc: [0, 0] };
+    const route = { type: 'way', id: 'w_route', tags: { highway: 'residential' }, nodes: ['n_route'] };
+    const bridge = makeBridge(ctx([sommetRoute, route]));
+
+    expect(bridge.nodesIn(partout)).toEqual([]);
+  });
+
+  it('filtre sur l’étendue demandée', () => {
+    const dedans = { type: 'node', id: 'n_dedans', loc: [0, 0] };
+    const dehors = { type: 'node', id: 'n_dehors', loc: [10, 10] };
+    const bridge = makeBridge(ctx([dedans, dehors]));
+
+    expect(bridge.nodesIn(partout).map(n => n.id)).toEqual(['n_dedans']);
+  });
+});

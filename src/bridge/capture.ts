@@ -120,6 +120,38 @@ function ringOverlapsExtent(ring: Ring, extent: [LonLat, LonLat]): boolean {
   return rMinLon <= maxLon && rMaxLon >= minLon && rMinLat <= maxLat && rMaxLat >= minLat;
 }
 
+/** Vrai si l'entité ne porte aucun tag — un simple sommet de géométrie. */
+function hasNoTags(e: any): boolean {
+  return !e.tags || Object.keys(e.tags).length === 0;
+}
+
+/** Vrai si `tags` décrit un bâtiment (au sens du contrôle de recouvrement, spec §5 étape 7). */
+function taggedBuilding(tags: any): boolean {
+  return !!tags?.building && tags.building !== 'no';
+}
+
+/**
+ * Ways membres (hors rôle `inner`) d'une relation taguée `building`.
+ *
+ * Un bâtiment cartographié en multipolygone porte ses tags sur la RELATION, jamais sur
+ * ses ways : `e.tags?.building` seul les manque tous. Or ce sont précisément les
+ * bâtiments à cour intérieure que le greffon refuse côté cadastre — donc ceux que
+ * quelqu'un a tracés à la main, et par-dessus lesquels créer un doublon serait la seule
+ * chose que la v1 promet de ne jamais faire.
+ *
+ * Les membres de rôle `inner` sont exclus : ce sont les cours, pas le bâti.
+ */
+function relationBuildingWayIds(entities: any[]): Set<string> {
+  const ids = new Set<string>();
+  for (const e of entities) {
+    if (e.type !== 'relation' || !taggedBuilding(e.tags)) continue;
+    for (const m of (e.members ?? []) as any[]) {
+      if (m?.type === 'way' && m.role !== 'inner' && typeof m.id === 'string') ids.add(m.id);
+    }
+  }
+  return ids;
+}
+
 function buildBridge(c: any): IdBridge {
   // Suffixe propre à CET appel de buildBridge (voir bridgeInstanceCounter plus haut) :
   // deux bridges construits sur le même contexte (retry, re-init...) ne doivent jamais
@@ -242,13 +274,48 @@ function buildBridge(c: any): IdBridge {
       return allBuildings().filter(b => ringOverlapsExtent(b.ring, extent));
     },
 
-    nodesNear(pt: LonLat, radiusM: number): ExistingNode[] {
-      const d = radiusM / 111320;
+    nodesIn(extent: [LonLat, LonLat]): ExistingNode[] {
+      const [[minLon, minLat], [maxLon, maxLat]] = extent;
       const entities = c.history().intersects(c.map().extent()) as any[];
+
+      // Sommets des bâtiments OSM chargés — y compris ceux des ways membres d'une
+      // relation taguée `building` (un multipolygone porte ses tags sur la relation,
+      // jamais sur ses ways : voir relationBuildingWayIds).
+      const relationWays = relationBuildingWayIds(entities);
+      const buildingVertexIds = new Set<string>();
+      const otherWayVertexIds = new Set<string>();
+      for (const e of entities) {
+        if (e.type !== 'way' || !Array.isArray(e.nodes)) continue;
+        const cible = taggedBuilding(e.tags) || relationWays.has(e.id as string)
+          ? buildingVertexIds
+          : otherWayVertexIds;
+        for (const id of e.nodes as string[]) cible.add(id);
+      }
+
       return entities
         .filter(e => e.type === 'node')
+        // Éligibilité (spec §5 étape 8 : « recaler sur un nœud OSM existant ») :
+        // l'intention est de recoudre un COIN DE BÂTIMENT voisin, rien d'autre. Sans
+        // filtre — c'était le cas — n'importe quel nœud chargé pouvait être happé et
+        // devenir un sommet du bâtiment créé :
+        //  - un nœud TAGUÉ (une adresse, un arbre, du mobilier urbain) : on lui ferait
+        //    porter un coin de maison, ce qui change le sens de l'objet existant ;
+        //  - un sommet de VOIRIE : rattacher un bâtiment à une route est une erreur que
+        //    les validateurs OSM signalent, et exactement le genre d'artefact d'import
+        //    que la communauté FR demande d'éviter.
+        // Un nœud est donc retenu s'il est sommet d'un bâtiment (way taguée `building`
+        // ou membre d'une relation `building`), ou s'il est nu ET n'appartient à aucune
+        // autre way. La règle est volontairement plus stricte que « nu ou sommet de
+        // bâtiment » : un sommet de route nu tomberait sinon dans le premier cas.
+        .filter(e => {
+          const id = e.id as string;
+          if (buildingVertexIds.has(id)) return true;
+          return hasNoTags(e) && !otherWayVertexIds.has(id);
+        })
         .map(e => ({ id: e.id as string, loc: e.loc as LonLat }))
-        .filter(n => Math.abs(n.loc[0] - pt[0]) < d * 2 && Math.abs(n.loc[1] - pt[1]) < d * 2);
+        .filter(n =>
+          n.loc[0] >= minLon && n.loc[0] <= maxLon &&
+          n.loc[1] >= minLat && n.loc[1] <= maxLat);
     },
 
     createBuilding(ring: Ring, tags: Record<string, string>, reused: (string | null)[]): void {

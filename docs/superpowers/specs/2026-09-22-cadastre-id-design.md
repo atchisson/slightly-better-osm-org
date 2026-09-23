@@ -99,10 +99,29 @@ mapExtent()          -> bbox
 project(lonLat)      -> [x, y] écran
 onMapMove(cb)
 buildingsNear(bbox)  -> entités OSM chargées (bâtiments)
-nodesNear(lonLat, m) -> nœuds OSM existants dans un rayon
+nodesIn(bbox)        -> nœuds OSM existants ÉLIGIBLES dans une étendue
 createBuilding(ring, tags, reusedNodes) -> une opération annulable
 prefillChangeset(comment, source)
 ```
+
+> **Corrigé le 2026-09-23, à la revue de branche.** Cette liste annonçait
+> `nodesNear(lonLat, m)` — un point et un rayon — et c'est ce qui a été implémenté.
+> C'était une erreur de la conception, pas de l'implémentation : **les sommets à
+> recoudre sont les coins de l'anneau composé, pas le point cliqué.** Avec un rayon de
+> 2 m centré sur le clic, la boîte interrogée vaut ±4,00 m en latitude et ±2,70 m en
+> longitude à 47,5° N, tandis que les coins d'une maison médiane d'Angers (83 m²,
+> ~9,1 m de côté) sont à 4,56 m du centre sur chaque axe : cliquer le milieu d'une
+> maison ordinaire ne ramenait **aucun** candidat. La réutilisation de nœuds — décision
+> validée du §2, motivée par les 70 % de bâti mitoyen — ne se déclenchait donc
+> pratiquement jamais, sans le moindre message. La primitive prend maintenant une
+> étendue, et l'appelant lui passe le rectangle englobant de l'anneau dilaté de la
+> tolérance de recalage.
+>
+> Deuxième correction du même appel : `nodesNear` ne filtrait **rien**. Un nœud
+> porteur de tags (adresse, arbre, mobilier urbain) ou un sommet de voirie pouvait
+> devenir un sommet du bâtiment créé. `nodesIn` ne rend qu'un nœud sommet d'un bâtiment
+> (way taguée `building`, ou membre d'une relation `building`), ou nu et n'appartenant
+> à aucune autre way.
 
 Aucun autre module ne touche à `iD`. Si iD change son amorçage, on répare ce fichier.
 
@@ -157,7 +176,12 @@ Ce choix a été fait en connaissance du risque : 16 % des constructions légèr
 5. Si l'union produit un trou ou plusieurs parties : refus, avec message.
 6. Supprimer les sommets colinéaires apparus aux coutures, puis simplifier (Douglas-Peucker, coefficient réglable, défaut à caler pendant l'implémentation). **Les deux passes doivent borner leur erreur** : tout sommet supprimé reste à moins de la tolérance du contour retenu. C'est une garantie que seul un algorithme global comme Douglas-Peucker apporte ; un test de proximité local, appliqué en cascade, laisse l'erreur se composer. Mesuré le 2026-09-23 : une première implémentation locale déplaçait des contours réels jusqu'à 7,27 m avec une tolérance de 2 cm.
 7. Contrôle de recouvrement avec les bâtiments OSM existants : refus si recouvrement.
-8. Recaler chaque sommet sur un nœud OSM existant s'il s'en trouve un à portée.
+8. Recaler chaque sommet sur un nœud OSM existant **éligible** s'il s'en trouve un à
+   portée. Éligible veut dire : sommet d'un bâtiment OSM (way taguée `building`, ou
+   membre d'une relation `building`), ou nœud nu n'appartenant à aucune autre way. Un
+   nœud taggué qui n'est pas un coin de bâtiment (une adresse, un arbre) et un sommet de
+   voirie sont exclus — les happer reviendrait à modifier le sens d'un objet existant, ou
+   à rattacher un bâtiment à une route.
 9. Créer les nœuds manquants et la way, en une seule opération annulable. Sélectionner le résultat.
 
 Cette règle est **symétrique** : cliquer le porche ou cliquer la maison donne le même bâtiment, puisque l'appartenance du porche ne dépend pas du point cliqué. Un `01` n'est jamais fusionné avec un autre `01`. Un `03` est un bâtiment à part entière, jamais un appendice.

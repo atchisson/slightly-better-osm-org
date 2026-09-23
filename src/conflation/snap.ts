@@ -1,4 +1,4 @@
-import { segmentLength } from '../geometry/edges';
+import { dilatedExtent, segmentLength } from '../geometry/edges';
 import type { LonLat, Ring } from '../geometry/types';
 
 export interface ExistingNode { id: string; loc: LonLat; }
@@ -25,6 +25,28 @@ export function snapToExistingNodes(
 ): SnapResult {
   const open = ring.slice(0, -1);
 
+  // Borne sur la liste de nœuds — la revue l'avait différée, et elle comptait peu tant
+  // que le bridge n'interrogeait qu'une boîte de 2,7 m autour du clic (correctif C1 :
+  // il interroge maintenant l'emprise du bâtiment). L'appariement est en
+  // O(sommets x nœuds) ; ce préfiltre le ramène aux seuls nœuds qui peuvent
+  // physiquement produire un candidat.
+  //
+  // Il est EXACT, pas approché : un nœud hors du rectangle englobant de l'anneau dilaté
+  // de `toleranceM` est à plus de `toleranceM` de TOUS les sommets — il n'aurait produit
+  // aucun candidat. Le retirer ne change donc aucun résultat, seulement le coût. La
+  // dilatation n'est pas un détail : un nœud voisin situé juste à l'extérieur d'un coin
+  // est hors du rectangle BRUT tout en étant à portée, et c'est précisément le cas que
+  // ce module existe pour traiter (un coin de bâtiment mitoyen déjà importé).
+  //
+  // Aucun plafond en nombre par-dessus, délibérément : tronquer une liste déjà réduite
+  // aux seuls nœuds à portée reviendrait à laisser tomber en silence une réutilisation
+  // légitime — le mode d'échec exact que ce correctif existe pour supprimer. Le
+  // préfiltre borne déjà le coût par une quantité géographique (les nœuds OSM à 20 cm du
+  // contour d'un bâtiment), pas par un compteur arbitraire.
+  const [[minLon, minLat], [maxLon, maxLat]] = dilatedExtent(ring, toleranceM);
+  const bounded = nodes.filter(n =>
+    n.loc[0] >= minLon && n.loc[0] <= maxLon && n.loc[1] >= minLat && n.loc[1] <= maxLat);
+
   // Attribution globale au plus proche, et non gloutonne dans l'ordre de l'anneau : un
   // sommet rencontré en premier ne doit pas pouvoir s'approprier un nœud sur lequel un
   // sommet plus tardif tombe exactement. On forme donc tous les couples (sommet, nœud) à
@@ -35,7 +57,7 @@ export function snapToExistingNodes(
   const candidates: Candidate[] = [];
   for (let i = 0; i < open.length; i++) {
     const vertex = open[i]!;
-    for (const node of nodes) {
+    for (const node of bounded) {
       const dist = segmentLength(vertex, node.loc);
       if (dist <= toleranceM) candidates.push({ vertexIndex: i, node, dist });
     }

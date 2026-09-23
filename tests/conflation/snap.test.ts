@@ -56,3 +56,26 @@ describe('snapToExistingNodes', () => {
     expect(r.ring[0]).toEqual(r.ring[r.ring.length - 1]);
   });
 });
+
+describe('snapToExistingNodes — borne sur la liste de nœuds', () => {
+  // Le préfiltre d'emprise (borne de coût, C1) doit dilater le rectangle englobant de
+  // la tolérance. Sans dilatation il serait faux et pas seulement moins rapide : un
+  // nœud voisin situé juste À L'EXTÉRIEUR d'un coin est hors du rectangle brut tout en
+  // étant à portée — et c'est exactement le cas que ce module existe pour traiter.
+  it('réutilise un nœud à portée mais hors du rectangle englobant brut', () => {
+    // ~11 cm au sud-ouest du coin [0,0] : dehors sur les DEUX axes.
+    const dehors = { id: 'n1', loc: [-0.0000005, -0.000001] as [number, number] };
+    const r = snapToExistingNodes(carre, [dehors], 0.2);
+    expect(r.reused[0]).toBe('n1');
+  });
+
+  it('un grand nombre de nœuds lointains ne change pas le résultat', () => {
+    const proche = { id: 'n1', loc: [0, 0] as [number, number] };
+    const lointains = Array.from({ length: 5000 }, (_, i) => ({
+      id: `loin${i}`, loc: [1 + i * 0.001, 1] as [number, number],
+    }));
+    const attendu = snapToExistingNodes(carre, [proche], 0.2);
+    const avecBruit = snapToExistingNodes(carre, [proche, ...lointains], 0.2);
+    expect(avecBruit).toEqual(attendu);
+  });
+});

@@ -6,6 +6,7 @@ import { readCache, writeCache } from './cadastre/store';
 import { communeAt } from './cadastre/insee';
 import { overlapsExisting } from './conflation/overlap';
 import { snapToExistingNodes, DEFAULT_SNAP_TOLERANCE_M } from './conflation/snap';
+import { dilatedExtent } from './geometry/edges';
 import { buildingTags, changesetComment } from './tagging/tags';
 import { createOverlay, type Overlay } from './ui/overlay';
 import { refusalMessage } from './ui/messages';
@@ -267,8 +268,17 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
         notify(refusalMessage('batiment-existant'));
         return;
       }
+      // Les sommets à recoudre sont les COINS de l'anneau composé, pas le point cliqué :
+      // on interroge donc l'emprise de l'anneau, dilatée de la tolérance de recalage.
+      // Interroger un rayon autour du clic (ce que faisait la version précédente)
+      // ne ramenait aucun candidat sur une maison de taille ordinaire — ses coins sont
+      // à 4,56 m du centre sur chaque axe pour une médiane d'Angers, la boîte faisait
+      // ±2,70 m en longitude — donc la réutilisation de nœuds ne se déclenchait
+      // pratiquement jamais, sans le moindre message. Voir IdBridge.nodesIn.
       const snapped = snapToExistingNodes(
-        r.ring, bridge.nodesNear(pt, DEFAULT_SNAP_TOLERANCE_M * 10), DEFAULT_SNAP_TOLERANCE_M);
+        r.ring,
+        bridge.nodesIn(dilatedExtent(r.ring, DEFAULT_SNAP_TOLERANCE_M)),
+        DEFAULT_SNAP_TOLERANCE_M);
       const tags = buildingTags({ isolatedLight: r.isolatedLight, millesime: dataset!.millesime });
 
       bridge.createBuilding(snapped.ring, tags, snapped.reused);
