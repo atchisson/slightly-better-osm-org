@@ -2524,7 +2524,7 @@ Trois contraintes que le spike a établies dans la douleur, la première version
 3. **Toute l'interception est sous `try/catch`**, setter compris : une exception levée là casse l'amorçage d'iD.
 
 **Files:**
-- Create: `src/bridge/capture.ts`, `src/bridge/context.ts`, `src/bridge/types.ts`
+- Create: `src/bridge/capture.ts`, `src/bridge/types.ts`
 - Test: `tests/bridge/capture.test.ts`
 
 **Interfaces:**
