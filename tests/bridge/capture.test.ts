@@ -582,3 +582,55 @@ describe('surfaceNode — une seule origine de projection', () => {
     }
   });
 });
+
+describe('buildingsNear — bâtiments en multipolygone (I5)', () => {
+  // Un bâtiment à cour intérieure est cartographié en relation `multipolygon` : ses
+  // tags sont sur la RELATION, jamais sur ses ways. Le filtre `e.tags?.building` les
+  // manquait donc tous — et ce sont exactement les bâtiments que le greffon refuse côté
+  // cadastre (géométrie à trou), donc ceux que quelqu'un a tracés à la main. Créer un
+  // doublon par-dessus est la seule chose que la v1 promet de ne jamais faire.
+  const sommets: Record<string, { loc: [number, number] }> = {
+    a: { loc: [0, 0] }, b: { loc: [1, 0] }, c: { loc: [1, 1] }, d: { loc: [0, 1] },
+    e: { loc: [0.2, 0.2] }, f: { loc: [0.8, 0.2] }, g: { loc: [0.8, 0.8] }, h: { loc: [0.2, 0.8] },
+  };
+  const ctx = (entities: any[]) => ({
+    map: () => ({ extent: () => ({ rectangle: () => [-90, -90, 90, 90] }), on: () => {}, off: () => {} }),
+    history: () => ({ intersects: () => entities }),
+    graph: () => ({ entity: (id: string) => sommets[id] }),
+    projection: Object.assign((p: unknown) => p, { invert: (p: unknown) => p }),
+    perform: () => {},
+    enter: () => {},
+    container: () => ({ node: () => document.createElement('div') }),
+  });
+  const partout: [[number, number], [number, number]] = [[-1, -1], [2, 2]];
+
+  const contour = { type: 'way', id: 'w_outer', nodes: ['a', 'b', 'c', 'd', 'a'] };
+  const cour = { type: 'way', id: 'w_inner', nodes: ['e', 'f', 'g', 'h', 'e'] };
+  const relation = {
+    type: 'relation', id: 'r1', tags: { type: 'multipolygon', building: 'yes' },
+    members: [
+      { type: 'way', id: 'w_outer', role: 'outer' },
+      { type: 'way', id: 'w_inner', role: 'inner' },
+    ],
+  };
+
+  it('voit le contour extérieur d’un bâtiment dont les tags sont sur la relation', () => {
+    const bridge = makeBridge(ctx([contour, cour, relation]));
+    expect(bridge.buildingsNear(partout).map(b => b.id)).toContain('w_outer');
+  });
+
+  it('ignore les ways de rôle `inner` : une cour n’est pas du bâti', () => {
+    // Les inclure ferait refuser un bâtiment légitime construit DANS la cour.
+    const bridge = makeBridge(ctx([contour, cour, relation]));
+    expect(bridge.buildingsNear(partout).map(b => b.id)).not.toContain('w_inner');
+  });
+
+  it('ignore une relation qui n’est pas un bâtiment', () => {
+    const site = {
+      type: 'relation', id: 'r2', tags: { type: 'multipolygon', landuse: 'meadow' },
+      members: [{ type: 'way', id: 'w_outer', role: 'outer' }],
+    };
+    const bridge = makeBridge(ctx([contour, site]));
+    expect(bridge.buildingsNear(partout)).toEqual([]);
+  });
+});

@@ -195,8 +195,17 @@ function buildBridge(c: any): IdBridge {
     if (buildingCache) return buildingCache;
     const entities = c.history().intersects(c.map().extent()) as any[];
     const graph = c.graph();
+    // Un bâtiment cartographié en MULTIPOLYGONE porte ses tags sur la relation, pas sur
+    // ses ways : `e.tags?.building` seul les manquait tous. Or ce sont exactement les
+    // bâtiments à cour intérieure que le greffon refuse côté cadastre — donc ceux que
+    // quelqu'un a tracés à la main — et créer un doublon par-dessus est précisément la
+    // seule chose que la v1 promet de ne jamais faire.
+    const membresDeRelation = relationBuildingWayIds(entities);
     buildingCache = entities
-      .filter(e => e.type === 'way' && e.tags?.building && e.tags.building !== 'no')
+      .filter(e =>
+        e.type === 'way' &&
+        Array.isArray(e.nodes) &&
+        (taggedBuilding(e.tags) || membresDeRelation.has(e.id as string)))
       .map(e => ({
         id: e.id as string,
         ring: (e.nodes as string[]).map(id => graph.entity(id).loc as LonLat),
@@ -270,6 +279,17 @@ function buildBridge(c: any): IdBridge {
       }
     },
 
+    /**
+     * Limite connue, documentée et non corrigée ici : `history().intersects()` ne rend
+     * que ce qui est CHARGÉ. Juste après un déplacement de carte, avant que la réponse
+     * de l'API OSM n'arrive, cette liste est vide — et l'aperçu affiche alors « ok »,
+     * une affirmation positive qu'il n'y a rien là, fondée sur un graphe vide.
+     *
+     * Le contexte capturé par le spike n'expose aucune primitive VÉRIFIÉE qui dise
+     * qu'un chargement OSM est en cours ; en inventer une sur une hypothèse serait
+     * exactement le genre de pari que ce projet a refusé ailleurs. C'est donc documenté
+     * dans le README (« Limites connues ») plutôt que deviné ici.
+     */
     buildingsNear(extent: [LonLat, LonLat]): ExistingBuilding[] {
       return allBuildings().filter(b => ringOverlapsExtent(b.ring, extent));
     },

@@ -246,6 +246,14 @@ vérifier après chaque mise à jour d'iD ou d'osm.org.
   de refus inexact (« plusieurs morceaux séparés » au lieu de « cour intérieure »,
   par exemple) sans jamais produire de géométrie fausse. Non observé sur les 37 848
   bâtiments réels d'Angers testés.
+- **Le contrôle « bâtiment déjà présent » ne voit que ce qu'iD a déjà chargé.** Juste
+  après un déplacement de carte, et tant que la réponse de l'API OSM n'est pas arrivée,
+  le greffon ne connaît aucun bâtiment existant dans la nouvelle zone : l'aperçu
+  s'affiche alors en vert, ce qui est une affirmation positive (« il n'y a rien ici »)
+  fondée sur un graphe encore vide. Concrètement : **attendre que les données OSM soient
+  affichées avant de cliquer**, comme pour n'importe quel tracé à la main. Le contexte
+  d'iD capturé par ce greffon n'expose pas de signal vérifié disant qu'un chargement est
+  en cours ; plutôt que de le deviner, la limite est écrite ici.
 - **Recouvrement par chevauchement exactement colinéaire non détecté.** Un cas de
   mesure nulle en pratique (il faudrait un alignement au flottant près) qu'il serait
   dangereux de corriger naïvement : le correctif évident ferait refuser une grande
