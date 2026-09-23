@@ -317,6 +317,11 @@ export const USERSCRIPT_META = `// ==UserScript==
 Run: `npx vitest run tests/smoke.test.ts`
 Expected: PASS, 2 tests.
 
+> **Correction post-revue (2026-09-23).** Les deux blocs de code ci-dessous — `tsconfig.json` au Step 4 et `esbuild.config.mjs` au Step 8 — contenaient deux défauts que la revue de tâche a rattrapés. Le code réellement livré diffère, et c'est lui qui fait foi :
+>
+> 1. L'extraction du bandeau par expression régulière indexait `.match(...)[1]` sans vérifier que la capture est bien un bandeau, ni même qu'il y a eu correspondance. Un `meta.ts` réorganisé aurait produit un userscript silencieusement invalide. La version livrée valide la forme du bandeau et vérifie le fichier produit, en jetant bruyamment sinon — ce qui recycle au passage le `readFileSync`/`writeFileSync` inutile du Step 8.
+> 2. `tsconfig.json` listait `esbuild.config.mjs` dans `include` sans `allowJs`, si bien que le fichier n'était **jamais** typé. `npm run typecheck` donnait une fausse assurance sur le seul fichier fragile de la chaîne. La version livrée ajoute `allowJs`, `checkJs` et `@types/node`.
+
 - [ ] **Step 8: Créer `esbuild.config.mjs`**
 
 ```js
