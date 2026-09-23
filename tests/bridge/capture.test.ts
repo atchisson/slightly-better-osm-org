@@ -421,3 +421,62 @@ describe('prefillChangeset', () => {
     expect(Number(localStorage.getItem('commentDate'))).not.toBeNaN();
   });
 });
+
+describe('onMapMove — plusieurs abonnements sur le même bridge', () => {
+  // Revue (tâche 16) : l'overlay (task 15) et le rechargement de commune de mode.ts
+  // (task 16) s'abonnent tous deux à onMapMove SUR LE MÊME BRIDGE. Avant ce correctif,
+  // les deux partageaient le même espace de nom d3 `move.${ns}` (un par bridge, pas un
+  // par abonnement) : le second `.on()` remplaçait silencieusement le premier. Ces
+  // tests exercent directement le contrat public d'onMapMove — deux abonnements
+  // doivent coexister, et se désabonner de l'un ne doit jamais retirer l'autre.
+  const ctxAvecEvenements = () => {
+    // Un vrai registre keyed par type.namespace complet, comme d3 : deux clés
+    // DIFFÉRENTES coexistent et sont TOUTES DEUX appelées quand on simule 'move'.
+    const listeners: Record<string, () => void> = {};
+    return {
+      map: () => ({
+        extent: () => ({ rectangle: () => [-90, -90, 90, 90] }),
+        on: (typename: string, cb: () => void) => { listeners[typename] = cb; },
+        off: (typename: string) => { delete listeners[typename]; },
+      }),
+      history: () => ({ intersects: () => [] }),
+      graph: () => ({ entity: () => ({ loc: [0, 0] }) }),
+      projection: Object.assign((p: unknown) => p, { invert: (p: unknown) => p }),
+      perform: () => {},
+      enter: () => {},
+      container: () => ({}),
+      __declencherDeplacement: () => {
+        for (const k of Object.keys(listeners)) if (k.startsWith('move.')) listeners[k]!();
+      },
+    };
+  };
+
+  it('deux abonnements distincts reçoivent tous les deux un déplacement de carte', () => {
+    const ctx = ctxAvecEvenements();
+    const bridge = makeBridge(ctx);
+
+    let appelsA = 0, appelsB = 0;
+    bridge.onMapMove(() => { appelsA++; });
+    bridge.onMapMove(() => { appelsB++; });
+
+    ctx.__declencherDeplacement();
+
+    expect(appelsA).toBe(1);
+    expect(appelsB).toBe(1);
+  });
+
+  it('désabonner l’un laisse l’autre fonctionner', () => {
+    const ctx = ctxAvecEvenements();
+    const bridge = makeBridge(ctx);
+
+    let appelsA = 0, appelsB = 0;
+    const desabonnerA = bridge.onMapMove(() => { appelsA++; });
+    bridge.onMapMove(() => { appelsB++; });
+
+    desabonnerA();
+    ctx.__declencherDeplacement();
+
+    expect(appelsA).toBe(0);
+    expect(appelsB).toBe(1);
+  });
+});

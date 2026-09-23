@@ -145,6 +145,20 @@ function buildBridge(c: any): IdBridge {
   //    contexte le permet — voir la seconde tentative juste en dessous.
   let buildingCache: ExistingBuilding[] | null = null;
 
+  // Revue (tâche 16) : `onMapMove` utilisait un espace de nom fixe, un par BRIDGE
+  // (`move.${ns}`) — jamais un par abonnement. L'overlay (task 15) s'y abonne une
+  // fois ; le mode cadastre (task 16, rechargement au changement de commune) s'y
+  // abonne une seconde fois SUR LE MÊME BRIDGE. Sous la convention d3 « type.namespace
+  // remplace tout abonnement portant exactement le même type.namespace », le second
+  // `.on('move.${ns}', ...)` écrasait silencieusement le premier : passé l'activation
+  // du mode, le calque de survol arrêtait de se redessiner sur un déplacement de carte.
+  // Personne ne l'avait vu : `onMapMove` n'avait jamais eu qu'un seul appelant avant.
+  // Corrigé comme le cache interne le fait déjà pour lui-même (suffixe `-cache`,
+  // commentaire juste en dessous) : chaque appel à `onMapMove` reçoit son PROPRE
+  // suffixe, unique pour ce bridge, de sorte que N abonnements coexistent sans se
+  // remplacer, et que se désabonner de l'un ne retire que le sien.
+  let mapMoveSubCounter = 0;
+
   const allBuildings = (): ExistingBuilding[] => {
     if (buildingCache) return buildingCache;
     const entities = c.history().intersects(c.map().extent()) as any[];
@@ -208,9 +222,13 @@ function buildBridge(c: any): IdBridge {
       // Même tentative que le cache interne, avec le même degré de prudence : le
       // spike n'a jamais exercé map().on/off. Si ça échoue, on ne casse pas l'appelant
       // (Task 15/16) : on rend un désabonnement inoffensif plutôt que de propager.
+      // Suffixe propre à CET appel (voir mapMoveSubCounter plus haut) : deux abonnements
+      // sur le même bridge ne doivent jamais se marcher dessus, et se désabonner de
+      // l'un ne doit jamais retirer l'autre.
+      const subNs = `${ns}-move${++mapMoveSubCounter}`;
       try {
-        c.map().on(`move.${ns}`, cb);
-        return () => c.map().off(`move.${ns}`, cb);
+        c.map().on(`move.${subNs}`, cb);
+        return () => c.map().off(`move.${subNs}`, cb);
       } catch {
         console.log(
           "[cadastre-id] aucun signal de deplacement de carte verifie sur map() : " +

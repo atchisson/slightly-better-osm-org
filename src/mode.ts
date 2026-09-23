@@ -82,11 +82,10 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
   let loading: Promise<void> | null = null;
   let stopMapMove: (() => void) | null = null;
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-  // Vrai pendant qu'un rechargement déclenché par un déplacement de carte est en vol
-  // (voir scheduleReload). hoverAt le consulte pour ne jamais dessiner un contour qui
-  // viendrait de l'ancienne commune pendant que la nouvelle se charge — « cacher
-  // pendant l'échange est le comportement honnête » (revue).
-  let reloading = false;
+  // Dernière raison d'échec de chargement notifiée, ou null si le dernier chargement a
+  // réussi. Sert uniquement à ne pas répéter la même notification en boucle (voir
+  // startLoad) — jamais consultée pour décider quoi que ce soit d'autre.
+  let lastFailureReason: 'commune-introuvable' | 'reseau' | null = null;
 
   /**
    * Démarre un chargement, l'enregistre dans `loading` (que whenReady() attend et que
@@ -95,13 +94,35 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
    * chargement (ensureDataset) et par le rechargement au franchissement de frontière
    * (scheduleReload) : les deux chemins doivent se protéger de la même façon contre une
    * résolution tardive qui écraserait un jeu de données plus récent avec un plus ancien.
+   *
+   * Revue (deuxième passe) : `loading` est la SEULE source de vérité sur « un
+   * chargement est-il en vol ». Une première version de ce correctif ajoutait un
+   * booléen `reloading` séparé pour que hoverAt puisse le consulter sans await — mais ce
+   * booléen n'avait pas la même garde d'identité que `loading`, et un rechargement lent
+   * qui se termine après un plus rapide le remettait à faux pendant que le plus rapide
+   * était encore réellement en vol. Supprimé : hoverAt et ensureDataset lisent
+   * maintenant directement `loading`, qui a toujours eu la bonne garantie.
    */
   const startLoad = (pt: LonLat, apply: (d: Dataset) => void): Promise<void> => {
     const p: Promise<void> = loadDataset(pt)
-      .then(d => { if (loading === p) apply(d); })
+      .then(d => {
+        // Un chargement qui réussit, même s'il est périmé par un plus récent (et donc
+        // pas appliqué ci-dessous), prouve que le réseau et l'API répondent : la
+        // prochaine panne, s'il y en a une, mérite une notification fraîche.
+        lastFailureReason = null;
+        if (loading === p) apply(d);
+      })
       .catch(err => {
         if (loading !== p) return; // une charge plus récente a déjà pris le relais
         const reason = err instanceof CommuneIntrouvableError ? 'commune-introuvable' : 'reseau';
+        // Un rechargement déclenché par onMapMove peut se représenter toutes les
+        // 500 ms près d'une frontière de commune ou pendant une panne réseau : sans
+        // cette garde, chaque tentative identique rouvrirait `notify` (window.alert en
+        // production), un dialogue bloquant à répétition qui rendrait le greffon
+        // inutilisable près d'une frontière (revue, deuxième passe). Une raison qui
+        // CHANGE notifie quand même — ce n'est plus la même panne.
+        if (reason === lastFailureReason) return;
+        lastFailureReason = reason;
         notify(refusalMessage(reason));
       })
       .finally(() => { if (loading === p) loading = null; });
@@ -109,10 +130,26 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
     return p;
   };
 
-  const ensureDataset = (pt: LonLat): Promise<void> => {
-    if (dataset) return Promise.resolve();
-    if (loading !== null) return loading;
-    return startLoad(pt, d => { dataset = d; });
+  const ensureDataset = async (pt: LonLat): Promise<void> => {
+    // Un chargement (initial OU un rechargement déclenché par un changement de
+    // commune) peut être remplacé par un autre avant de se résoudre (la garde
+    // `if (loading === p)` de startLoad, ci-dessus, assure qu'un résultat périmé
+    // n'écrase jamais un dataset plus récent). Cette boucle attend jusqu'à ce
+    // qu'AUCUN chargement ne soit plus en vol — pas seulement celui vu au premier
+    // passage — sinon un clic pendant une CHAÎNE de rechargements qui se chevauchent
+    // composerait contre des données pas encore à jour.
+    //
+    // Revue (deuxième passe) : avant ce correctif, cette fonction retournait
+    // immédiatement dès que `dataset` existait, MÊME si `loading` pointait vers un
+    // rechargement en cours pour une AUTRE commune — un clic pendant ce court
+    // intervalle composait contre l'ancien dataset et échouait en silence avec
+    // « aucun bâtiment », reproduisant le symptôme du défaut initial, en transitoire
+    // au lieu de permanent. Vérifier `loading` en premier, systématiquement, corrige
+    // les deux chemins (le premier chargement et clickAt pendant un rechargement) avec
+    // une seule garde.
+    while (loading !== null) await loading;
+    if (dataset) return;
+    await startLoad(pt, d => { dataset = d; });
   };
 
   const centreOf = (extent: [LonLat, LonLat]): LonLat => {
@@ -138,11 +175,10 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
       if (!enabled || !dataset) return; // rien de chargé encore : le premier chargement s'en charge
-      reloading = true;
       overlay?.hide(); // le contour affiché appartient à l'ancienne commune : honnête de l'effacer
       void startLoad(centreOf(bridge.mapExtent()), d => {
         if (d.insee !== dataset?.insee) dataset = d;
-      }).finally(() => { reloading = false; });
+      });
     }, RELOAD_DEBOUNCE_MS);
   };
 
@@ -193,11 +229,15 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
 
     hoverAt(pt) {
       if (!enabled || !overlay) return;
-      // Un rechargement de commune est en vol : le dataset actuel appartient encore à
-      // l'ancienne commune (il ne sera remplacé qu'à la résolution de startLoad), donc
-      // tout contour qu'il produirait maintenant serait potentiellement celui d'un
-      // endroit que la carte a déjà quitté. Cacher plutôt que risquer de montrer faux.
-      if (reloading) { overlay.hide(); return; }
+      // Un chargement (initial ou un rechargement de commune) est en vol : le dataset
+      // actuel peut déjà être périmé (il ne sera remplacé, ou confirmé inchangé,
+      // qu'à la résolution de startLoad), donc tout contour produit maintenant
+      // pourrait appartenir à un endroit que la carte a déjà quitté. Cacher plutôt que
+      // risquer de montrer faux. `loading` porte déjà la bonne garantie (garde
+      // d'identité dans startLoad) : pas besoin d'un second drapeau qui pourrait
+      // diverger de lui — c'était le bug de l'ancien booléen `reloading` (revue,
+      // deuxième passe).
+      if (loading !== null) { overlay.hide(); return; }
       const r = compose(pt);
       // r === null (dataset pas encore chargé) et r.ok === false (refus de composition,
       // qui ne porte jamais de ring) empruntent le même chemin : rien à montrer de

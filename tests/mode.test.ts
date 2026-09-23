@@ -16,6 +16,31 @@ const feature = (type: string, ring: number[][]) => ({
 const carre = (x0: number, y0: number, d = 0.001) =>
   [[x0, y0], [x0 + d, y0], [x0 + d, y0 + d], [x0, y0 + d], [x0, y0]];
 
+/**
+ * Fait de bridge.onMapMove un vrai registre à plusieurs abonnés (un Set), comme le
+ * fait déjà tests/ui/overlay.test.ts pour ses propres tests (fauxBridgeAvecDeplacements)
+ * — et comme src/bridge/capture.ts le fait réellement depuis la revue de la tâche 16.
+ *
+ * Revue : la version précédente de ce fichier utilisait un slot unique
+ * (`let onMove; bridge.onMapMove = cb => { onMove = cb; ... }`), qui reproduisait
+ * silencieusement exactement le bug que cette revue a trouvé dans le bridge réel
+ * (« deux abonnements sur le même bridge s'écrasent ») — sauf que dans le mode, il n'y a
+ * QU'UN SEUL abonné (scheduleReload), donc le bug du bridge ne se voyait pas ici. Un
+ * Set est correct dans les deux cas : un seul abonné ou plusieurs.
+ */
+function bridgeAvecDeplacements(bridge: IdBridge): { declencherDeplacement: () => void } {
+  const listeners = new Set<() => void>();
+  bridge.onMapMove = (cb) => { listeners.add(cb); return () => { listeners.delete(cb); }; };
+  return { declencherDeplacement: () => { for (const cb of listeners) cb(); } };
+}
+
+/** Une promesse que le test résout à la main, pour contrôler précisément l'ordre de résolution. */
+function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>(res => { resolve = res; });
+  return { promise, resolve };
+}
+
 describe('mode cadastre', () => {
   let container: HTMLElement;
   let bridge: IdBridge;
@@ -290,8 +315,7 @@ describe('mode cadastre', () => {
       const loadDataset = vi.fn(async (pt: LonLat): Promise<Dataset> =>
         (pt[0] < 0.4 ? datasetA : datasetB));
 
-      let onMove: (() => void) | null = null;
-      bridge.onMapMove = (cb) => { onMove = cb; return () => { onMove = null; }; };
+      const { declencherDeplacement } = bridgeAvecDeplacements(bridge);
 
       let extent: [LonLat, LonLat] = [[0, 0], [0.01, 0.01]]; // centre (0.005, 0.005) : commune A
       bridge.mapExtent = () => extent;
@@ -305,7 +329,7 @@ describe('mode cadastre', () => {
 
       // La carte se recentre sur la commune B (franchissement de frontière).
       extent = [[0.495, 0.495], [0.505, 0.505]]; // centre (0.5, 0.5)
-      onMove!();
+      declencherDeplacement();
       await vi.advanceTimersByTimeAsync(1000); // laisse le débounce puis le rechargement se dérouler
 
       expect(loadDataset).toHaveBeenLastCalledWith([0.5, 0.5]);
@@ -315,6 +339,209 @@ describe('mode cadastre', () => {
 
       mode.hoverAt([0.0005, 0.0005]); // l'ancien point : n'existe plus dans B
       expect(container.querySelector('path')!.getAttribute('d')).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // --- Revue (deuxième passe) : clickAt doit attendre un rechargement en cours ---
+  //
+  // ensureDataset() retournait immédiatement dès que `dataset` existait — même si
+  // `loading` pointait vers un rechargement en cours pour une AUTRE commune. Un clic
+  // pendant cette fenêtre composait contre l'ancien dataset et échouait en silence avec
+  // « aucun bâtiment » (non notifié : voir clickAt) — le symptôme exact du défaut
+  // initial, réduit d'une fenêtre permanente à une fenêtre transitoire.
+  it('clickAt attend un rechargement de commune en cours plutôt que de composer contre l’ancien dataset', async () => {
+    vi.useFakeTimers();
+    try {
+      const datasetA = buildDataset('49007', '2026', [feature('01', carre(0, 0))]);
+      const datasetB = buildDataset('49008', '2026', [feature('01', carre(0.5, 0.5))]);
+      const { promise: chargementB, resolve: resoudreChargementB } = deferred<Dataset>();
+
+      let appels = 0;
+      const loadDataset = vi.fn(async (): Promise<Dataset> => {
+        appels++;
+        return appels === 1 ? datasetA : chargementB; // 1er appel : A, immediat ; 2e : B, différé
+      });
+
+      const { declencherDeplacement } = bridgeAvecDeplacements(bridge);
+      let extent: [LonLat, LonLat] = [[0, 0], [0.01, 0.01]];
+      bridge.mapExtent = () => extent;
+
+      const mode = createMode(bridge, { loadDataset, communeName: async () => 'X', notify: vi.fn() });
+      mode.enable();
+      await mode.whenReady(); // charge A
+
+      // Franchissement de frontière : le rechargement démarre mais reste EN VOL (la
+      // promesse différée n'est pas encore résolue).
+      extent = [[0.495, 0.495], [0.505, 0.505]];
+      declencherDeplacement();
+      await vi.advanceTimersByTimeAsync(600); // le débounce se déclenche, startLoad(B) démarre
+
+      // Un clic sur un point qui n'existe que dans B, PENDANT que le rechargement de B
+      // est encore en vol : ne doit ni créer sur la base de l'ancien dataset (A, où ce
+      // point est « aucun bâtiment », silencieusement ignoré) ni avancer avant que B
+      // soit disponible.
+      const clic = mode.clickAt([0.5, 0.5]);
+      expect(created).toHaveLength(0); // toujours en attente à ce stade précis
+
+      resoudreChargementB(datasetB);
+      await clic;
+
+      expect(created).toHaveLength(1); // le clic a bien utilisé les données de B, pas un no-op silencieux
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // --- Revue (deuxième passe) : un booléen ne peut pas savoir s'il est le plus récent ---
+  //
+  // L'ancien drapeau `reloading` était remis à faux par CELUI QUI SE TERMINE EN
+  // PREMIER, sans se soucier de savoir s'il est encore le rechargement pertinent. Pour
+  // que le bug se voie, il faut que le rechargement DÉPASSÉ (le plus ancien,
+  // `loading` ne pointe plus vers lui) se résolve AVANT le rechargement COURANT
+  // (`loading` pointe encore vers lui) — pas l'inverse : si le courant se résout en
+  // premier, remettre `reloading` à faux à ce moment-là est déjà correct, et la
+  // résolution tardive du dépassé, ensuite, ne fait plus de dégâts (rien à observer).
+  // Ce test place donc volontairement le dépassé (vers B) en premier à se résoudre,
+  // PENDANT que le courant (vers C) est encore authentiquement en vol.
+  it('un rechargement dépassé qui se résout pendant qu’un plus récent est encore en vol ne rouvre pas l’aperçu par erreur', async () => {
+    vi.useFakeTimers();
+    try {
+      const datasetA = buildDataset('49007', '2026', [feature('01', carre(0, 0))]);
+      const datasetB = buildDataset('49008', '2026', [feature('01', carre(0.5, 0.5))]);
+      const datasetC = buildDataset('49009', '2026', [feature('01', carre(0.9, 0.9))]);
+      const perime = deferred<Dataset>(); // rechargement vers B : dépassé par C avant de se résoudre
+      const enVol = deferred<Dataset>();  // rechargement vers C : le plus récent, reste en vol pendant la vérification
+
+      let appels = 0;
+      const loadDataset = vi.fn(async (): Promise<Dataset> => {
+        appels++;
+        if (appels === 1) return datasetA;
+        if (appels === 2) return perime.promise;
+        return enVol.promise;
+      });
+
+      const { declencherDeplacement } = bridgeAvecDeplacements(bridge);
+      let extent: [LonLat, LonLat] = [[0, 0], [0.01, 0.01]];
+      bridge.mapExtent = () => extent;
+
+      const mode = createMode(bridge, { loadDataset, communeName: async () => 'X', notify: vi.fn() });
+      mode.enable();
+      await mode.whenReady(); // charge A (appel 1)
+
+      extent = [[0.495, 0.495], [0.505, 0.505]]; // vers B
+      declencherDeplacement();
+      await vi.advanceTimersByTimeAsync(600); // démarre le rechargement vers B (appel 2), en vol
+
+      extent = [[0.895, 0.895], [0.905, 0.905]]; // vers C, AVANT que B ne se résolve — B devient dépassé
+      declencherDeplacement();
+      await vi.advanceTimersByTimeAsync(600); // démarre le rechargement vers C (appel 3), en vol
+
+      // Le DÉPASSÉ (B) se résout D'ABORD, alors que le COURANT (C) est toujours en vol.
+      // Son application est déjà correctement ignorée (garde `loading === p` de
+      // startLoad — la partie que la revue a jugée déjà correcte) : `dataset` reste A.
+      perime.resolve(datasetB);
+      await vi.advanceTimersByTimeAsync(0); // laisse la chaîne de B se dérouler entièrement
+
+      // À CET INSTANT PRÉCIS, C (le seul rechargement qui compte) est TOUJOURS en vol.
+      // Un survol maintenant ne doit RIEN montrer — ni A (périmé par le déplacement vers
+      // C), ni B (jamais appliqué), et surtout pas à cause d'un drapeau qui se serait
+      // remis à faux par erreur au passage de B.
+      mode.hoverAt([0.0005, 0.0005]); // le bâtiment de A
+      expect(container.querySelector('path')!.getAttribute('d')).toBe('');
+
+      // Puis C se résout : l'état doit enfin refléter C.
+      enVol.resolve(datasetC);
+      await mode.whenReady(); // whenReady() lit `loading` ici : encore celui de C
+
+      mode.hoverAt([0.9, 0.9]); // bâtiment de C
+      expect(container.querySelector('path')!.getAttribute('d')).not.toBe('');
+
+      mode.hoverAt([0.5, 0.5]); // bâtiment de B : jamais installé
+      expect(container.querySelector('path')!.getAttribute('d')).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // --- Revue (deuxième passe) : ne pas transformer chaque échec en fenêtre modale ---
+  //
+  // Chaque rechargement raté appelait notify (window.alert en production). Près d'une
+  // frontière de commune, ou pendant une panne réseau, le débounce se représente toutes
+  // les 500 ms : sans déduplication, un survol prolongé produirait une rafale de
+  // dialogues bloquants identiques, rendant le greffon inutilisable.
+  it('plusieurs échecs de rechargement consécutifs et identiques ne notifient qu’une seule fois', async () => {
+    vi.useFakeTimers();
+    try {
+      const datasetA = buildDataset('49007', '2026', [feature('01', carre(0, 0))]);
+      let appels = 0;
+      const loadDataset = vi.fn(async (): Promise<Dataset> => {
+        appels++;
+        if (appels === 1) return datasetA;
+        throw new Error('cadastre.data.gouv.fr a répondu 500'); // panne réseau persistante
+      });
+
+      const { declencherDeplacement } = bridgeAvecDeplacements(bridge);
+      let extent: [LonLat, LonLat] = [[0, 0], [0.01, 0.01]];
+      bridge.mapExtent = () => extent;
+      const notify = vi.fn();
+
+      const mode = createMode(bridge, { loadDataset, communeName: async () => 'X', notify });
+      mode.enable();
+      await mode.whenReady(); // charge A avec succès
+
+      // Trois déplacements consécutifs, chacun déclenchant une tentative de
+      // rechargement qui échoue EXACTEMENT de la même façon.
+      for (let i = 0; i < 3; i++) {
+        extent = [[0.1 * (i + 1), 0.1 * (i + 1)], [0.1 * (i + 1) + 0.01, 0.1 * (i + 1) + 0.01]];
+        declencherDeplacement();
+        await vi.advanceTimersByTimeAsync(600);
+      }
+
+      expect(notify).toHaveBeenCalledTimes(1);
+      expect(notify).toHaveBeenCalledWith(expect.stringMatching(/connexion/i));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('une notification identique revient après un chargement réussi entre-temps', async () => {
+    vi.useFakeTimers();
+    try {
+      const datasetA = buildDataset('49007', '2026', [feature('01', carre(0, 0))]);
+      const datasetB = buildDataset('49008', '2026', [feature('01', carre(0.5, 0.5))]);
+      let appels = 0;
+      const loadDataset = vi.fn(async (): Promise<Dataset> => {
+        appels++;
+        if (appels === 1) return datasetA; // chargement initial
+        if (appels === 2) throw new Error('panne 1'); // premier échec réseau
+        if (appels === 3) return datasetB; // succès entre les deux échecs
+        throw new Error('panne 2'); // second échec réseau, identique en raison au premier
+      });
+
+      const { declencherDeplacement } = bridgeAvecDeplacements(bridge);
+      let extent: [LonLat, LonLat] = [[0, 0], [0.01, 0.01]];
+      bridge.mapExtent = () => extent;
+      const notify = vi.fn();
+
+      const mode = createMode(bridge, { loadDataset, communeName: async () => 'X', notify });
+      mode.enable();
+      await mode.whenReady();
+
+      extent = [[0.1, 0.1], [0.11, 0.11]];
+      declencherDeplacement();
+      await vi.advanceTimersByTimeAsync(600); // échec 1 : notifie
+
+      extent = [[0.495, 0.495], [0.505, 0.505]];
+      declencherDeplacement();
+      await vi.advanceTimersByTimeAsync(600); // succès (B) : réinitialise la déduplication
+
+      extent = [[0.2, 0.2], [0.21, 0.21]];
+      declencherDeplacement();
+      await vi.advanceTimersByTimeAsync(600); // échec 2, même raison : notifie À NOUVEAU
+
+      expect(notify).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
