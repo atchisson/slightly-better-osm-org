@@ -2511,7 +2511,17 @@ git commit -m "feat(conflation): detection de recouvrement et recalage sur les n
 
 ## Task 14: Le bridge vers iD
 
-**Écrire cette tâche en suivant le compte rendu de spike de Task 1.** Les noms exacts ci-dessous sont les hypothèses de conception ; si le spike en a démenti un, c'est le spike qui fait foi, et il faut corriger le code ici sans changer la signature exposée.
+**Le spike a eu lieu le 2026-09-23 et il est concluant** — voir [docs/superpowers/spikes/2026-09-22-capture-contexte-id.md](../spikes/2026-09-22-capture-contexte-id.md). Le code ci-dessous a déjà été corrigé sur ses quatre conclusions ; ce qui suit résume ce qui est **vérifié en navigateur** et ce qui reste supposé.
+
+Vérifié présent : `iD.osmNode`, `iD.osmWay`, `iD.actionAddEntity`, `iD.actionChangeTags`, `iD.modeSelect`, `iD.coreGraph`, `iD.prefs` ; et sur le contexte `graph`, `history`, `map`, `perform`, `enter`, `projection` (avec `invert`), `container`, `entity`, `mode`. Les appels `map().extent().rectangle()`, `projection.invert` et `history().intersects(extent)` ont été exercés pour de vrai — le dernier a rendu 24 611 entités sur une vue ordinaire.
+
+Vérifié absent : **`context.storage`**, remplacé par `iD.prefs` ; et `iD.version`, qui n'existe pas (le namespace expose `uiVersion`). L'auto-test porte sur les primitives, pas sur un numéro de version, ce qui est de toute façon plus robuste.
+
+Trois contraintes que le spike a établies dans la douleur, la première version de la sonde ayant cassé l'éditeur :
+
+1. **iD vit dans une iframe servie à `/id`.** Le bridge, le bouton et le calque appartiennent à ce document. Ne pas ajouter `@noframes`.
+2. **On n'écrit jamais sur le namespace `iD`** — ses exports sont des getters sans setter. D'où le `Proxy`.
+3. **Toute l'interception est sous `try/catch`**, setter compris : une exception levée là casse l'amorçage d'iD.
 
 **Files:**
 - Create: `src/bridge/capture.ts`, `src/bridge/context.ts`, `src/bridge/types.ts`
@@ -2622,27 +2632,51 @@ import type { ExistingBuilding } from '../conflation/overlap';
 import type { ExistingNode } from '../conflation/snap';
 import type { LonLat, Ring } from '../geometry/types';
 
+// `storage` ne figure PAS ici : il n'existe plus sur le contexte (spike du 2026-09-23).
 const PRIMITIVES = ['map', 'history', 'graph', 'projection', 'perform', 'enter', 'container'] as const;
 
-/** Pose un piège sur window.iD et résout dès que coreContext() a produit une instance. */
+/**
+ * Pose un piège sur window.iD et résout dès que coreContext() a produit une instance.
+ *
+ * Deux contraintes viennent du spike, et aucune n'est négociable :
+ *
+ * 1. On n'écrit JAMAIS sur le namespace. Ses exports sont des getters sans setter, et
+ *    `value.coreContext = wrapper` lève une TypeError. Comme cette exception remonte
+ *    depuis le setter de window.iD, elle casse l'amorçage d'iD. On expose donc un Proxy.
+ * 2. Tout est sous try/catch. En cas d'échec on rend le namespace intact : le plugin se
+ *    désactive, l'éditeur démarre.
+ */
 export function captureContext(): Promise<unknown> {
   return new Promise(resolve => {
-    let namespace: any = undefined;
-    Object.defineProperty(globalThis, 'iD', {
-      configurable: true,
-      get: () => namespace,
-      set(value: any) {
-        if (value && typeof value.coreContext === 'function') {
-          const original = value.coreContext;
-          value.coreContext = function (this: unknown, ...args: unknown[]) {
-            const ctx = original.apply(this, args);
-            resolve(ctx);
-            return ctx;
-          };
-        }
-        namespace = value;
+    let exposed: unknown = undefined;
+
+    const wrap = (namespace: any): any => new Proxy(namespace, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver);
+        if (prop !== 'coreContext' || typeof value !== 'function') return value;
+        return function (this: unknown, ...args: unknown[]) {
+          const ctx = value.apply(this, args);
+          resolve(ctx);
+          return ctx;
+        };
       },
     });
+
+    try {
+      Object.defineProperty(globalThis, 'iD', {
+        configurable: true,
+        get: () => exposed,
+        set(value: any) {
+          try {
+            exposed = wrap(value);
+          } catch {
+            exposed = value;   // iD doit démarrer même si on échoue
+          }
+        },
+      });
+    } catch {
+      /* on ne peut pas piéger : whenReady ne résoudra pas, l'auto-test désactivera */
+    }
   });
 }
 
@@ -2718,7 +2752,19 @@ function buildBridge(c: any): IdBridge {
     },
 
     prefillChangeset(comment: string): void {
-      c.storage('comment', comment);
+      // `context.storage` n'existe plus (spike du 2026-09-23). iD expose `prefs` sur le
+      // namespace, et le commentaire vit dans localStorage sous la clé `comment`, sans
+      // préfixe. `commentDate` doit suivre : iD périme un commentaire trop ancien, et
+      // l'oublier ferait ignorer le nôtre en silence.
+      const iD = (globalThis as any).iD;
+      const write = (k: string, v: string): void => {
+        try {
+          if (iD && typeof iD.prefs === 'function') iD.prefs(k, v);
+          else localStorage.setItem(k, v);
+        } catch { /* le préremplissage est un confort, jamais un bloquant */ }
+      };
+      write('comment', comment);
+      write('commentDate', String(Date.now()));
     },
 
     containerNode(): HTMLElement {
