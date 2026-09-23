@@ -1475,6 +1475,11 @@ describe('composeAt', () => {
 Run: `npx vitest run tests/compose.test.ts`
 Expected: FAIL — module introuvable.
 
+> **Corrections post-revue (2026-09-23).** Deux défauts du bloc ci-dessous, rattrapés à l'implémentation :
+>
+> 1. `ComposeInput` omettait `polyAt` dans ce bloc alors qu'il figurait dans les interfaces de la tâche et que `hit()` le lit — le code ne compilait pas sous `strict`. Corrigé ci-dessous.
+> 2. Les tests du Step 1 n'exerçaient `trou-source` que par un polygone qui est lui-même l'ancre trouée. Le cas que la tâche réclame explicitement — un **membre absorbé** troué alors que l'ancre est saine — n'était couvert par aucun test, alors que c'est précisément lui qui honore le contrat de `union.ts`. Un test a été ajouté et vérifié par mutation : une garde qui ne regarderait que `anchor.holes` passe les tests du plan et échoue sur celui-là.
+
 - [ ] **Step 3: Implémenter**
 
 `src/compose.ts` :
@@ -1488,6 +1493,8 @@ export interface ComposeInput {
   polys: Poly[];
   edgeIndex: Map<string, number[]>;
   absorption: Map<number, number[]>;
+  /** test d'appartenance indexé ; à défaut, balayage linéaire (acceptable en test seulement) */
+  polyAt?: (pt: LonLat) => Poly | null;
   simplifyToleranceM?: number;
 }
 
@@ -2081,11 +2088,19 @@ export interface Dataset {
   polys: Poly[];
   edgeIndex: Map<string, number[]>;
   absorption: Map<number, number[]>;
+  /** id -> polygone ; construit ici, une fois par commune */
+  byId: Map<number, Poly>;
+  /** id d'un léger -> sa composante entière et son propriétaire éventuel */
+  lightIndex: Map<number, { ownerId: number | null; members: number[] }>;
   polyAt(pt: LonLat): Poly | null;
 }
 export function toPolys(features: unknown[]): Poly[];
 export function buildDataset(insee: string, millesime: string, features: unknown[]): Dataset;
 ```
+
+> **Ajout post-revue de la Task 8 (2026-09-23).** `byId` et `lightIndex` viennent d'un correctif de la Task 8 et **doivent être construits ici**, pas dans `composeFor`. Trois défauts s'y ramenaient : `composeFor` reconstruisait une `Map` de toute la commune à chaque appel alors que le survol l'appelle à chaque frame ; `anchorOf` balayait linéairement la table d'absorption sur le même chemin chaud ; et surtout, une composante légère orpheline à plusieurs membres était tronquée à son seul polygone cliqué — 167 composantes et 376 polygones concernés sur Angers, dont un ensemble de 19 abris.
+>
+> `lightIndex` associe **tout** polygone léger à sa composante, orpheline ou non, ce qui règle les trois d'un coup. Le construire depuis le retour de `lightComponents`, qui porte déjà `members` et `ownerId`.
 
 - [ ] **Step 1: Écrire les tests**
 
@@ -3168,6 +3183,8 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       polys: dataset.polys,
       edgeIndex: dataset.edgeIndex,
       absorption: dataset.absorption,
+      byId: dataset.byId,              // precalcule en Task 12 ; jamais reconstruit par appel
+      lightIndex: dataset.lightIndex,  // idem : sans lui, anchorOf balaie et les orphelines se tronquent
       polyAt: dataset.polyAt,          // indispensable : le survol balaierait sinon 50 000 polygones par frame
     });
   };
