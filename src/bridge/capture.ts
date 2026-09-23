@@ -89,15 +89,10 @@ function buildBridge(c: any): IdBridge {
   //    utilisée par onMapMove, donc déjà supposée disponible par la conception
   //    d'origine — ceci n'ajoute pas de nouvelle hypothèse non vérifiée) ;
   //  - après un perform() déclenché par NOTRE PROPRE createBuilding, seul endroit où ce
-  //    bridge modifie le graphe lui-même.
-  //
-  // PAS invalidé : une modification du graphe faite par ailleurs dans iD pendant que
-  // notre greffon est actif (l'utilisatrice déplace un nœud existant, dessine un autre
-  // bâtiment à la main, annule/rétablit...). Le contexte capturé n'expose aucun signal
-  // vérifié de changement de graphe — le spike n'a pas confirmé de `history().on(...)`
-  // ou équivalent, et en inventer un serait pire qu'assumer cette limite : le survol
-  // peut, dans cette fenêtre étroite, ignorer un bâtiment tout juste modifié ailleurs,
-  // jusqu'au prochain déplacement de carte.
+  //    bridge modifie le graphe lui-même ;
+  //  - au changement de graphe fait AILLEURS dans iD (l'utilisatrice déplace un nœud
+  //    existant, dessine un autre bâtiment à la main, annule/rétablit...), SI le
+  //    contexte le permet — voir la tentative juste en dessous.
   let buildingCache: ExistingBuilding[] | null = null;
 
   const allBuildings = (): ExistingBuilding[] => {
@@ -116,6 +111,23 @@ function buildBridge(c: any): IdBridge {
   // Espace de nom distinct de celui utilisé par onMapMove ('move.cadastre-id') : les
   // deux doivent coexister sans se remplacer l'un l'autre.
   c.map().on('move.cadastre-id-cache', () => { buildingCache = null; });
+
+  // Tentative, pas hypothèse : le spike a vérifié que history() existe et que
+  // history().intersects() fonctionne, jamais ce que l'objet renvoyé expose par
+  // ailleurs. iD's history est un émetteur d'événements dans toutes les versions
+  // connues, donc history().on('change...') a de bonnes chances de marcher — mais « de
+  // bonnes chances » n'est pas « vérifié ». Si l'appel échoue ou si .on est absent, on
+  // garde le comportement actuel (invalidation au seul déplacement de carte) : la
+  // dégradation est silencieuse pour l'éditeur, mais dite une fois en console, pour
+  // quiconque déboguerait, plutôt qu'enterrée dans un commentaire.
+  try {
+    c.history().on('change.cadastre-id-cache', () => { buildingCache = null; });
+  } catch {
+    console.log(
+      "[cadastre-id] aucun signal de changement du graphe verifie sur history() : " +
+      "le cache des batiments existants ne s'invalide qu'au deplacement de carte.",
+    );
+  }
 
   return {
     mapExtent(): [LonLat, LonLat] {

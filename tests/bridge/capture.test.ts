@@ -132,16 +132,26 @@ describe('cache de buildingsNear', () => {
     a: { loc: [0, 0] }, b: { loc: [1, 0] }, c: { loc: [1, 1] }, d: { loc: [0, 1] },
   };
 
-  const ctxAvecCompteur = (entities: any[]) => {
-    const ecouteurs: Record<string, () => void> = {};
+  // `avecHistoryOn` simule les deux formes de contexte réel possibles : celle où
+  // history() est un émetteur d'événements (probable mais jamais vérifié par le spike)
+  // et celle où il ne l'est pas (l'hypothèse la plus prudente, et celle que tous les
+  // autres tests de ce describe utilisent par défaut).
+  const ctxAvecCompteur = (entities: any[], avecHistoryOn = false) => {
+    const ecouteursCarte: Record<string, () => void> = {};
+    const ecouteursHistory: Record<string, () => void> = {};
     let appelsIntersects = 0;
+    const history: any = { intersects: () => { appelsIntersects++; return entities; } };
+    if (avecHistoryOn) {
+      history.on = (type: string, cb: () => void) => { ecouteursHistory[type] = cb; };
+      history.off = (type: string) => { delete ecouteursHistory[type]; };
+    }
     const ctx = {
       map: () => ({
         extent: () => ({ rectangle: () => [-90, -90, 90, 90] }),
-        on: (type: string, cb: () => void) => { ecouteurs[type] = cb; },
-        off: (type: string) => { delete ecouteurs[type]; },
+        on: (type: string, cb: () => void) => { ecouteursCarte[type] = cb; },
+        off: (type: string) => { delete ecouteursCarte[type]; },
       }),
-      history: () => ({ intersects: () => { appelsIntersects++; return entities; } }),
+      history: () => history,
       graph: () => ({ entity: (id: string) => nodes[id] }),
       projection: Object.assign((p: unknown) => p, { invert: (p: unknown) => p }),
       perform: () => {},
@@ -151,7 +161,8 @@ describe('cache de buildingsNear', () => {
     return {
       ctx,
       appels: () => appelsIntersects,
-      declencherDeplacement: () => { for (const k of Object.keys(ecouteurs)) if (k.startsWith('move')) ecouteurs[k]!(); },
+      declencherDeplacement: () => { for (const k of Object.keys(ecouteursCarte)) if (k.startsWith('move')) ecouteursCarte[k]!(); },
+      declencherChangementGraphe: () => { for (const k of Object.keys(ecouteursHistory)) if (k.startsWith('change')) ecouteursHistory[k]!(); },
     };
   };
 
@@ -202,6 +213,66 @@ describe('cache de buildingsNear', () => {
       expect(appels()).toBe(2);
     } finally {
       delete (globalThis as any).iD;
+    }
+  });
+
+  // Le spike a vérifié que history() existe et que history().intersects() fonctionne,
+  // jamais ce que l'objet renvoyé expose par ailleurs. Les deux tests suivants couvrent
+  // les deux formes de contexte réel possibles.
+
+  it('invalide aussi le cache quand history() expose on() et émet un changement', () => {
+    const { ctx, appels, declencherChangementGraphe } = ctxAvecCompteur([batiment], true);
+    const bridge = makeBridge(ctx);
+
+    bridge.buildingsNear(vueEntiere);
+    declencherChangementGraphe();
+    bridge.buildingsNear(vueEntiere);
+
+    expect(appels()).toBe(2);
+  });
+
+  it('se limite au déplacement de carte, sans jamais lever, quand history() n’expose pas on()', () => {
+    const espion = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const { ctx, appels, declencherDeplacement } = ctxAvecCompteur([batiment], false);
+
+      let bridge: ReturnType<typeof makeBridge> | undefined;
+      expect(() => { bridge = makeBridge(ctx); }).not.toThrow();
+
+      bridge!.buildingsNear(vueEntiere);
+      declencherDeplacement();
+      bridge!.buildingsNear(vueEntiere);
+      expect(appels()).toBe(2);
+
+      // La limitation est dite une fois en console, pas seulement dans un commentaire.
+      expect(espion).toHaveBeenCalledWith(expect.stringContaining('history'));
+    } finally {
+      espion.mockRestore();
+    }
+  });
+
+  // Preuve plus dure que la précédente : ici .on() EXISTE (ce n'est pas juste une
+  // méthode absente) mais lève à l'appel — la même famille de risque que celle qui a
+  // cassé l'éditeur au premier passage du spike (une exception non prévue au démarrage
+  // du greffon), mais par une autre porte. La construction du bridge ne doit toujours
+  // jamais lever.
+  it('ne lève jamais même si history().on() existe mais échoue à l’appel', () => {
+    const espion = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const ctx = {
+        map: () => ({ extent: () => ({ rectangle: () => [-90, -90, 90, 90] }), on: () => {}, off: () => {} }),
+        history: () => ({ intersects: () => [], on: () => { throw new Error('history().on indisponible'); } }),
+        graph: () => ({ entity: () => ({ loc: [0, 0] }) }),
+        projection: Object.assign((p: unknown) => p, { invert: (p: unknown) => p }),
+        perform: () => {},
+        enter: () => {},
+        container: () => ({}),
+      };
+
+      expect(() => makeBridge(ctx)).not.toThrow();
+      expect(espion).toHaveBeenCalledWith(expect.stringContaining('history'));
+    } finally {
+      espion.mockRestore();
     }
   });
 });
