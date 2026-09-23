@@ -74,21 +74,53 @@ describe('lightComponents', () => {
   });
 
   it('ne fusionne jamais deux durs mitoyens', () => {
+    // 99, 98 et 87 sont trois « 01 » mutuellement mitoyens (fixture réelle) ; seul
+    // 102 (un « 02 ») touche 99. Des assertions concrètes garantissent que 98 et 87
+    // ne peuvent pas fuiter dans les contacts ou l'attribution — un simple contrôle
+    // de type sur les membres serait vrai quelle que soit la logique d'attribution.
     const polys = fixtures.rangeeMitoyenne.polys as unknown as Poly[];
     const comps = analyse(polys);
-    for (const c of comps) {
-      for (const m of c.members) {
-        expect(polys.find(p => p.id === m)!.type).toBe('02');
-      }
-    }
+    expect(comps).toHaveLength(1);
+    const c = comps[0]!;
+    expect(c.members).toEqual([102]);
+    expect(c.contacts.size).toBe(1);
+    expect(c.contacts.get(99)).toBeCloseTo(4.2339, 2);
+    expect(c.ownerId).toBe(99);
   });
 
-  it('attribue le porche partagé à un seul dur, en signalant deux contacts', () => {
+  it('regroupe une chaîne synthétique de trois légers en une seule composante (transitivité)', () => {
+    // A touche B, B touche C, mais A ne touche pas C : seule la transitivité de
+    // l'union-find peut les réunir en une composante unique.
+    const polys = [
+      rect(0, '02', 0, 0, 0.001, 0.001),        // A
+      rect(1, '02', 0.001, 0, 0.002, 0.001),    // B, accolé à A
+      rect(2, '02', 0.002, 0, 0.003, 0.001),    // C, accolé à B, pas à A
+    ];
+    const comps = analyse(polys);
+    expect(comps).toHaveLength(1);
+    expect(comps[0]!.members).toEqual([0, 1, 2]);
+  });
+
+  it('fusionne la chaîne réelle de légers 31/39 en une composante, absorbée par 41', () => {
+    const polys = fixtures.chaineLegers.polys as unknown as Poly[];
+    const comps = analyse(polys);
+    expect(comps).toHaveLength(1);
+    const c = comps[0]!;
+    expect(c.members).toEqual([31, 39]);
+    expect(c.contacts.size).toBe(1);
+    expect(c.contacts.get(41)).toBeCloseTo(69.846, 2);
+    expect(c.ownerId).toBe(41);
+  });
+
+  it('attribue le porche partagé au dur avec la plus longue frontière (25), en signalant deux contacts', () => {
+    // Contacts réels : ~5.6434 m avec 26, ~5.7796 m avec 25 — un écart réel d'à peine 14 cm.
     const polys = fixtures.porchePartage.polys as unknown as Poly[];
     const comps = analyse(polys);
     const ambigue = comps.find(c => c.contacts.size >= 2);
     expect(ambigue).toBeDefined();
-    expect(ambigue!.ownerId).not.toBeNull();
+    expect(ambigue!.contacts.get(26)).toBeCloseTo(5.6434, 2);
+    expect(ambigue!.contacts.get(25)).toBeCloseTo(5.7796, 2);
+    expect(ambigue!.ownerId).toBe(25);
   });
 });
 
