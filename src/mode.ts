@@ -286,6 +286,11 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
     enable() {
       if (enabled) return;
       enabled = true;
+      // Réactiver le mode, c'est repartir d'une page blanche côté diagnostic. Sans
+      // cette remise à zéro, une panne identique à celle de la session précédente
+      // serait dédupliquée contre elle (voir notifyFailure) : la personne rallumerait le
+      // mode, ne verrait aucun message, et n'aurait qu'un mode qui ne fait rien.
+      lastFailureReason = null;
       overlay = createOverlay(bridge);
       void ensureDataset(centreOf(bridge.mapExtent()));
       // Le rechargement au franchissement de frontière (spec §3.3) : voir
@@ -296,6 +301,11 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
 
     disable() {
       enabled = false;
+      lastFailureReason = null;
+      // Un rechargement peut être en vol : sa cible ne doit pas survivre à l'extinction
+      // du mode, sinon la première résolution de commune après réactivation la
+      // comparerait à un chargement qui n'a plus cours.
+      loadingInsee = null;
       if (debounceTimer !== null) { clearTimeout(debounceTimer); debounceTimer = null; }
       stopMapMove?.();
       stopMapMove = null;

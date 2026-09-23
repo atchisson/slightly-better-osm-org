@@ -125,6 +125,26 @@ describe('lightComponents', () => {
 });
 
 describe('absorptionMap', () => {
+  // Deux porches sur des façades OPPOSÉES : jamais connectés entre eux, donc deux
+  // composantes distinctes, toutes deux attribuées à la même maison. C'est le seul
+  // chemin multi-absorption de cette fonction (la branche `list.push(...c.members)`),
+  // et c'est un cas courant du cœur de l'heuristique — il n'était couvert par aucun
+  // test.
+  it('fusionne deux composantes DISJOINTES sous le même propriétaire', () => {
+    const polys = [
+      rect(0, '01', 0, 0, 0.001, 0.001),
+      rect(1, '02', 0.001, 0, 0.002, 0.001),    // à l'est
+      rect(2, '02', -0.001, 0, 0, 0.001),       // à l'ouest, sans contact avec le premier
+    ];
+    const comps = analyse(polys);
+    expect(comps).toHaveLength(2);                     // bien deux composantes, pas une
+    expect(comps.every(c => c.ownerId === 0)).toBe(true);
+
+    const map = absorptionMap(comps);
+    expect([...map.keys()]).toEqual([0]);
+    expect([...map.get(0)!].sort((a, b) => a - b)).toEqual([1, 2]);
+  });
+
   it('range les légers sous leur ancre et ignore les orphelins', () => {
     const polys = [
       rect(0, '01', 0, 0, 0.001, 0.001),

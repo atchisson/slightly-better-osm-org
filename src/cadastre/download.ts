@@ -41,8 +41,28 @@ export async function downloadCommune(
   if (codes.length === 1) return downloadOne(insee, fetchFn);
 
   const parts = await Promise.all(codes.map(code => downloadOne(code, fetchFn)));
+
+  // Le millésime porté par chaque objet créé est une obligation d'attribution (Licence
+  // Ouverte). Le prendre sur `parts[0]` — le premier arrondissement — était un pari sur
+  // le fait qu'Etalab republie les vingt (ou seize, ou neuf) le même jour. S'ils
+  // divergent, l'attribution est fausse pour dix-neuf sur vingt, et fausse dans le sens
+  // le plus gênant : elle annonce des données plus fraîches qu'elles ne sont.
+  //
+  // On retient donc le PLUS ANCIEN. C'est la seule date dont on puisse affirmer que
+  // l'ensemble recollé est au moins à jour à cette date-là — les millésimes sont des
+  // années à quatre chiffres, donc l'ordre lexicographique est l'ordre chronologique.
+  // La divergence est dite en console : elle signale un jeu en cours de republication.
+  const millesimes = [...new Set(parts.map(part => part.millesime))].sort();
+  if (millesimes.length > 1) {
+    console.warn(
+      `[cadastre-id] millésimes différents entre les arrondissements de ${insee} ` +
+      `(${millesimes.join(', ')}) : le plus ancien est retenu pour l'attribution.`,
+      millesimes,
+    );
+  }
+
   return {
     features: parts.flatMap(part => part.features),
-    millesime: parts[0]!.millesime,
+    millesime: millesimes[0]!,
   };
 }

@@ -356,6 +356,29 @@ describe('mode cadastre', () => {
   });
 
 
+
+  // --- Revue finale (mineur 3) : lastFailureReason n'était jamais réinitialisé ---
+  //
+  // La déduplication des notifications (voir notifyFailure) est nécessaire — sans elle,
+  // une panne près d'une frontière rouvrirait un dialogue bloquant toutes les 500 ms.
+  // Mais elle ne doit pas survivre à un cycle éteint/rallumé : la personne qui rallume
+  // le mode après un échec attend un diagnostic, pas un mode muet qui ne fait rien.
+  it('une même panne notifie à nouveau après un cycle désactivation / réactivation', async () => {
+    const notify = vi.fn();
+    const loadDataset = vi.fn(async (): Promise<Dataset> => { throw new Error('panne réseau'); });
+    const mode = createMode(bridge, { loadDataset, communeName: async () => 'X', notify });
+
+    mode.enable();
+    await mode.whenReady();
+    expect(notify).toHaveBeenCalledTimes(1);
+
+    mode.disable();
+    mode.enable();
+    await mode.whenReady();
+
+    expect(notify).toHaveBeenCalledTimes(2);
+  });
+
   // --- Revue finale (I2) : un déplacement ne recharge plus la commune entière ---
   //
   // `scheduleReload` lançait `loadDataset` puis ne comparait l'INSEE qu'APRÈS coup, pour

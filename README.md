@@ -164,7 +164,7 @@ le fichier réel d'Angers, 50 740 bâtiments) :
   entre eux, l'unité que l'heuristique attribue effectivement — pas le polygone
   individuel du point précédent) : sur 2 072 composantes ambiguës mesurées, **255
   (12,3 %) sont décidées à moins de cinq centimètres d'écart** entre les deux
-  frontières candidates, certains par une égalité exacte départagée uniquement par
+  frontières candidates, certaines par une égalité exacte départagée uniquement par
   l'ordre des identifiants. Un porche réellement partagé entre deux maisons
   mitoyennes sera annexé au mauvais bâtiment dans une partie de ces cas — il n'y a pas
   de règle géométrique qui tranche ça correctement à chaque fois.

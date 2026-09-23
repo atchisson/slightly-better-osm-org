@@ -301,3 +301,32 @@ describe('composeFor — sommets partagés avec un bâtiment voisin (spec §5 é
     expect(r.ring.map(cle)).not.toContain('0.0005,47.5');
   });
 });
+
+describe('composeAt — deux composantes légères disjointes sous la même ancre', () => {
+  // Le pendant, côté composition, du test d'absorptionMap : deux porches sur des
+  // façades opposées doivent être absorbés TOUS LES DEUX par la maison, pas un seul.
+  it('absorbe les deux porches et étend le contour des deux côtés', () => {
+    const input = prepare([
+      rect(0, '01', 0, 0, 0.001, 0.001),
+      rect(1, '02', 0.001, 0, 0.002, 0.001),
+      rect(2, '02', -0.001, 0, 0, 0.001),
+    ]);
+    const r = composeAt([0.0005, 0.0005], input);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.absorbed).toEqual([1, 2]);
+    expect(Math.min(...r.ring.map(p => p[0]))).toBeCloseTo(-0.001, 10);
+    expect(Math.max(...r.ring.map(p => p[0]))).toBeCloseTo(0.002, 10);
+  });
+
+  it('donne le même bâtiment qu’on clique la maison ou l’un des deux porches', () => {
+    const input = prepare([
+      rect(0, '01', 0, 0, 0.001, 0.001),
+      rect(1, '02', 0.001, 0, 0.002, 0.001),
+      rect(2, '02', -0.001, 0, 0, 0.001),
+    ]);
+    const parMaison = composeAt([0.0005, 0.0005], input);
+    expect(composeAt([0.0015, 0.0005], input)).toEqual(parMaison);
+    expect(composeAt([-0.0005, 0.0005], input)).toEqual(parMaison);
+  });
+});

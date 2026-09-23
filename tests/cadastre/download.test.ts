@@ -69,4 +69,31 @@ describe('downloadCommune', () => {
       expect(url).not.toContain('75056');
     }
   });
+
+  // Le millésime porté par l'objet créé est une obligation d'attribution (Licence
+  // Ouverte). Pour Paris, Lyon et Marseille il était pris sur `parts[0]`, c'est-à-dire
+  // sur le PREMIER arrondissement : si Etalab republie les arrondissements à des dates
+  // différentes, l'attribution est fausse pour dix-neuf sur vingt — et fausse dans le
+  // sens le plus gênant, en annonçant des données plus fraîches qu'elles ne sont.
+  it('retient le millésime le plus ancien quand les arrondissements divergent', async () => {
+    const espion = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const body = await gzip(JSON.stringify({ features: [{ a: 1 }] }));
+      const fetchFn = vi.fn().mockImplementation(async (url: string) => ({
+        ok: true,
+        // le 1er arrondissement est republié en 2026, les autres datent de 2024
+        url: url.replace('/latest/', url.includes('75101') ? '/2026-06-01/' : '/2024-01-01/'),
+        body: new Blob([body]).stream(),
+      })) as unknown as typeof fetch;
+
+      const r = await downloadCommune('75056', fetchFn);
+
+      expect(r.millesime).toBe('2024');
+      // La divergence est dite, pas seulement absorbée : elle signale un jeu de données
+      // en cours de republication.
+      expect(espion).toHaveBeenCalledWith(expect.stringContaining('millésime'), expect.anything());
+    } finally {
+      espion.mockRestore();
+    }
+  });
 });
