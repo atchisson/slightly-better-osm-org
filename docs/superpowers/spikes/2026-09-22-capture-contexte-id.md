@@ -101,3 +101,35 @@ une session réelle. Les clés voisines importent :
 `iD.version` n'existe pas ; le namespace expose `uiVersion`. Le bridge n'en a pas besoin
 — son auto-test porte sur la présence des primitives, pas sur un numéro de version, ce
 qui est de toute façon plus robuste.
+
+## Relevé complémentaire — géométrie de l'interface d'iD (2026-09-24)
+
+Deux placements du bouton **Cadastre** ont échoué faute de ce relevé. Il est
+consigné ici parce qu'aucun test ne peut le produire : seul un navigateur le sait.
+
+```
+surface : 400,0 1520x606
+y=  5 -> div.top-toolbar        (bas=71)
+y= 15 -> button.bar-button      (bas=50)
+y= 55 -> span.localized-text    (bas=68)
+y= 75 -> svg.surface            (bas=606)
+```
+
+**La barre d'outils est posée PAR-DESSUS la carte.** `svg.surface` commence à
+`top=0` et s'étend sous le bandeau, qui descend jusqu'à 71 px. Mesurer l'écart
+entre le coin de la surface et celui du conteneur donne donc zéro : c'est
+l'erreur du deuxième placement. Le panneau latéral, lui, décale bien la carte
+(`left=400`).
+
+**`elementFromPoint` voit l'interface d'iD** : la barre renvoie ses propres
+éléments, elle n'est pas traversée par les événements de pointeur. C'est ce qui
+autorise le placement auto-correcteur de `src/ui/button.ts` — le bouton se pose,
+demande au document qui le recouvre, descend sous le gêneur, recommence. Si la
+barre avait été en `pointer-events:none`, la méthode aurait déclaré « libre » un
+point visuellement caché et il aurait fallu viser `div.top-toolbar` par son nom,
+depuis le bridge.
+
+Corollaire pour tout diagnostic d'affichage : « l'élément est dans le DOM » ne
+prouve rien. Le premier placement était présent, `visibility:visible`, opacité 1,
+et invisible. Le test qui tranche est
+`document.elementFromPoint(centre) === element`.

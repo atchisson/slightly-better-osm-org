@@ -1,35 +1,80 @@
-/** Marge entre le coin de la surface de carte et le bouton. */
-const INSET_PX = 10;
+/** Marge entre le bouton et ce qui le borde (coin de la carte, ou bas d'un élément d'iD). */
+const GAP_PX = 10;
+
+/** Nombre maximal de descentes avant d'abandonner et de le dire. */
+const MAX_DESCENTES = 5;
+
+/**
+ * Le plus bas des éléments qui recouvrent `button`, en coordonnées écran, ou
+ * `null` si rien ne le recouvre.
+ *
+ * On sonde neuf points (les quatre coins, les milieux d'arêtes, le centre) et non
+ * le seul centre : un bouton dont le centre est dégagé peut avoir son arête haute
+ * encore sous la barre d'outils, et c'est exactement ce qui se voit à l'écran.
+ *
+ * `elementFromPoint` est le bon outil ici parce qu'il a été vérifié en navigateur
+ * que la barre d'outils d'iD le renvoie bien (`div.top-toolbar`, `button.bar-button`,
+ * `span.localized-text`) : elle n'est pas traversée par les événements de pointeur.
+ * Si elle l'avait été, cette méthode aurait déclaré « libre » un point visuellement
+ * caché et il aurait fallu viser la barre par son nom, depuis le bridge.
+ */
+function recouvrementLePlusBas(button: HTMLElement): number | null {
+  const r = button.getBoundingClientRect();
+  if (r.width === 0 || r.height === 0) return null;
+
+  const xs = [r.left + 2, (r.left + r.right) / 2, r.right - 2];
+  const ys = [r.top + 2, (r.top + r.bottom) / 2, r.bottom - 2];
+
+  let bas: number | null = null;
+  for (const x of xs) {
+    for (const y of ys) {
+      let el: Element | null = null;
+      // Absent ou non implémenté (jsdom) : on renonce à descendre plutôt que
+      // d'échouer. Le bouton reste au coin de la carte, ce qui est dégradé mais
+      // jamais cassé.
+      try { el = document.elementFromPoint(x, y); } catch { return null; }
+      if (!el || el === button || button.contains(el)) continue;
+      const b = el.getBoundingClientRect().bottom;
+      if (bas === null || b > bas) bas = b;
+    }
+  }
+  return bas;
+}
 
 /**
  * Le bouton d'activation du mode cadastre, posé sur la carte.
  *
- * **Le placement se mesure, il ne se devine pas.** La première version posait le
- * bouton en `top:10px; right:10px` du conteneur d'iD — c'est-à-dire exactement
- * sous la barre « Annuler / Rétablir / Sauvegarder ». Constaté en navigateur :
- * le bouton était bien dans le DOM (68×34, `display:block`, `visibility:visible`,
- * opacité 1), mais `document.elementFromPoint()` sur son centre renvoyait le
- * compteur du bouton Sauvegarder. Il était recouvert : invisible et incliquable.
- * Monter le `z-index` l'aurait fait passer PAR-DESSUS Sauvegarder — pire encore.
+ * **Il cherche sa place lui-même.** Deux placements codés en dur ont échoué avant
+ * celui-ci, pour la même raison : toute constante suppose une géométrie d'iD que
+ * personne n'a mesurée.
  *
- * D'où le coin haut-GAUCHE de la surface : iD occupe le haut (barre d'outils) et
- * la colonne de droite (zoom, fonds, calques, préférences) ; ce coin-là est libre.
+ * 1. `top:10px; right:10px` du conteneur — sous la barre « Annuler / Rétablir /
+ *    Sauvegarder ». Le bouton était dans le DOM, `visibility:visible`, opacité 1,
+ *    et pourtant invisible : `elementFromPoint` sur son centre renvoyait le
+ *    compteur du bouton Sauvegarder.
+ * 2. Coin haut-gauche de la surface de carte, mesuré contre le conteneur. Faux
+ *    aussi : la barre d'outils d'iD est posée PAR-DESSUS la carte, elle ne la
+ *    décale pas. La surface commence à `top=0`, l'écart mesuré valait zéro, et le
+ *    bouton est resté sous le bandeau (qui descend, lui, jusqu'à 71 px).
  *
- * On ne connaît ni la hauteur de la barre d'outils d'iD ni la largeur de son
- * panneau latéral, et aucune des deux n'est stable (repli du panneau,
- * redimensionnement). On lit donc l'écart réel entre le coin de la surface et
- * celui du conteneur, et on le remesure dès que la surface bouge. Aucune valeur
- * interne d'iD n'est codée en dur ici.
+ * D'où cette version : le bouton se pose au coin de la carte, demande au document
+ * qui le recouvre, descend sous le plus bas des gêneurs, et recommence. Aucune
+ * hauteur de barre d'outils, aucun nom de classe d'iD, aucune constante à revoir
+ * quand l'éditeur changera — ni quand la barre se repliera sur une fenêtre étroite.
  *
  * @param container conteneur d'iD (`bridge.containerNode()`), ancêtre positionné
  * @param surface   surface de carte (`bridge.surfaceNode()`), la même que celle
  *                  qui sert d'origine à la projection et porte l'overlay
+ * @returns le bouton et son `destroy`, sur le modèle de `createOverlay` : le
+ *          replacement s'abonne à la fenêtre et à la surface, il doit pouvoir s'en
+ *          détacher. `src/main.ts` n'a pas de chemin de démontage et ne l'appelle
+ *          pas — le bouton vit autant que la page ; les tests, eux, en ont besoin.
  */
 export function createButton(
   container: HTMLElement,
   surface: Element,
   onToggle: (on: boolean) => void,
-): HTMLButtonElement {
+): { element: HTMLButtonElement; destroy: () => void } {
   const button = document.createElement('button');
   button.className = 'cadastre-id-toggle';
   button.type = 'button';
@@ -43,8 +88,28 @@ export function createButton(
   const place = (): void => {
     const c = container.getBoundingClientRect();
     const s = surface.getBoundingClientRect();
-    button.style.top = `${Math.round(s.top - c.top) + INSET_PX}px`;
-    button.style.left = `${Math.round(s.left - c.left) + INSET_PX}px`;
+
+    // Garde-fou : un élément inattendu qui couvrirait toute la hauteur pousserait
+    // le bouton hors de la carte. Passé la moitié de la surface, on s'arrête et on
+    // le dit — un bouton mal placé se voit et se contourne, un bouton parti hors
+    // écran ne se diagnostique pas.
+    const limite = s.top + s.height / 2;
+
+    button.style.left = `${Math.round(s.left + GAP_PX - c.left)}px`;
+    let haut = s.top + GAP_PX;
+
+    for (let i = 0; i <= MAX_DESCENTES; i++) {
+      button.style.top = `${Math.round(haut - c.top)}px`;
+      const bas = recouvrementLePlusBas(button);
+      if (bas === null) return;
+      if (bas + GAP_PX > limite) break;
+      haut = bas + GAP_PX;
+    }
+
+    console.warn(
+      "[cadastre-id] le bouton Cadastre n'a pas trouvé de place libre sur la carte ; " +
+      "il reste visible mais peut être recouvert par l'interface d'iD.",
+    );
   };
 
   let on = false;
@@ -61,9 +126,20 @@ export function createButton(
   // La surface change de taille sans que la fenêtre bouge : repli du panneau
   // latéral, ouverture d'un panneau d'informations. ResizeObserver couvre ces cas
   // comme le redimensionnement de fenêtre ; l'écouteur `resize` reste en filet
-  // pour les environnements qui ne l'implémentent pas (jsdom, entre autres).
-  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(place).observe(surface);
+  // pour les environnements qui ne l'implémentent pas.
+  let observer: ResizeObserver | null = null;
+  if (typeof ResizeObserver !== 'undefined') {
+    observer = new ResizeObserver(place);
+    observer.observe(surface);
+  }
   window.addEventListener('resize', place);
 
-  return button;
+  return {
+    element: button,
+    destroy: () => {
+      window.removeEventListener('resize', place);
+      observer?.disconnect();
+      button.remove();
+    },
+  };
 }
