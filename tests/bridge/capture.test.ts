@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { captureContext, makeBridge } from '../../src/bridge/capture';
+import { captureContext, makeBridge, raceCaptureAgainstTimeout } from '../../src/bridge/capture';
 
 describe('captureContext', () => {
   beforeEach(() => {
@@ -642,5 +642,81 @@ describe('buildingsNear — bâtiments en multipolygone (I5)', () => {
     };
     const bridge = makeBridge(ctx([contour, site]));
     expect(bridge.buildingsNear(partout)).toEqual([]);
+  });
+});
+
+// Le chien de garde de src/main.ts : si captureContext() ne se résout jamais (iD a
+// changé la forme de son namespace, coreContext() n'est plus jamais appelé), le
+// premier `await` du script restait bloqué pour toujours, en silence — le mode de
+// rupture le plus probable, et jusqu'ici le seul à ne rien dire du tout en console.
+// src/main.ts n'est pas restructuré pour être testable (IIFE de haut niveau sur les
+// globales du navigateur) ; cette logique de course l'a été, en l'extrayant ici.
+describe('raceCaptureAgainstTimeout', () => {
+  function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
+    let resolve!: (v: T) => void;
+    const promise = new Promise<T>(r => { resolve = r; });
+    return { promise, resolve };
+  }
+
+  it('se résout avec le contexte capturé quand la capture aboutit avant le délai', async () => {
+    vi.useFakeTimers();
+    try {
+      const { promise, resolve } = deferred<unknown>();
+      const outcome = raceCaptureAgainstTimeout(promise, 8000);
+      resolve({ marker: 'ctx' });
+      await expect(outcome).resolves.toEqual({ status: 'captured', context: { marker: 'ctx' } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('n’attend pas tout le délai quand la capture aboutit tout de suite', async () => {
+    vi.useFakeTimers();
+    try {
+      const { promise, resolve } = deferred<unknown>();
+      resolve({ marker: 'immediat' });
+      // Aucun vi.advanceTimersByTimeAsync ici : si la résolution obtenue dépendait du
+      // minuteur plutôt que de la capture elle-même, cet await resterait bloqué et le
+      // test échouerait par timeout — la preuve recherchée, pas une reformulation de
+      // l'implémentation.
+      const outcome = await raceCaptureAgainstTimeout(promise, 8000);
+      expect(outcome).toEqual({ status: 'captured', context: { marker: 'immediat' } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('se résout en « timed-out » si le délai s’écoule avant que la capture aboutisse', async () => {
+    vi.useFakeTimers();
+    try {
+      const { promise } = deferred<unknown>(); // ne se résout jamais
+      const outcomePromise = raceCaptureAgainstTimeout(promise, 8000);
+      await vi.advanceTimersByTimeAsync(8000);
+      await expect(outcomePromise).resolves.toEqual({ status: 'timed-out' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Garde contre une fausse alerte : une capture qui finit par aboutir APRÈS que le
+  // délai a déjà tranché ne doit ni changer le verdict déjà rendu, ni lever quoi que
+  // ce soit. C'est exactement la garantie dont src/main.ts a besoin pour ne jamais
+  // journaliser « désactivé » puis, juste après, agir comme si la capture avait
+  // réussi.
+  it('une capture qui aboutit après le délai n’altère plus le verdict déjà rendu', async () => {
+    vi.useFakeTimers();
+    try {
+      const { promise, resolve } = deferred<unknown>();
+      const outcomePromise = raceCaptureAgainstTimeout(promise, 8000);
+      await vi.advanceTimersByTimeAsync(8000);
+      await expect(outcomePromise).resolves.toEqual({ status: 'timed-out' });
+
+      resolve({ marker: 'trop-tard' });
+      await vi.advanceTimersByTimeAsync(0);
+
+      await expect(outcomePromise).resolves.toEqual({ status: 'timed-out' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

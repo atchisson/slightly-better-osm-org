@@ -6,6 +6,70 @@ import type { LonLat, Ring } from '../geometry/types';
 // `storage` ne figure PAS ici : il n'existe plus sur le contexte (spike du 2026-09-23).
 const PRIMITIVES = ['map', 'history', 'graph', 'projection', 'perform', 'enter', 'container'] as const;
 
+// Rappel partagé par les trois messages de désactivation (auto-test makeBridge,
+// garde coreContext figé ici même, et le chien de garde de src/main.ts) : le dépôt
+// n'est pas publié, un lien GitHub qui y pointerait rendrait 404. Le seul repli
+// actionnable pour quelqu'un qui voit ce message est de suspecter un changement
+// dans la forme interne d'iD et de repasser la checklist qui existe pour ça.
+export const DISABLE_HINT =
+  "iD a peut-être changé ses internes ; voir docs/verification-manuelle.md.";
+
+/**
+ * Résultat d'une course entre `captureContext()` et un délai. `main.ts` en a besoin
+ * pour distinguer « la capture a réussi » de « elle n'arrivera jamais » sans jamais
+ * laisser le premier `await` du script attendre indéfiniment en silence — c'est
+ * précisément le mode de rupture le plus probable (iD change la forme de son
+ * namespace) et jusqu'ici le seul qui ne disait rien du tout en console.
+ */
+export type CaptureRaceOutcome =
+  | { status: 'captured'; context: unknown }
+  | { status: 'timed-out' };
+
+/**
+ * Délai avant d'abandonner l'attente de `coreContext()`. 8000 ms : assez long pour
+ * couvrir le chargement du bundle d'iD (plusieurs Mo) sur une connexion lente ou un
+ * cache froid — ce n'est PAS le signal qu'on cherche à capter, un chargement lent
+ * finit toujours par appeler coreContext() — assez court pour qu'une rupture
+ * structurelle réelle (le namespace n'a plus la forme attendue, coreContext()
+ * n'est jamais appelé) se voie en console en un seul coup d'œil pendant une session
+ * de débogage, plutôt que de laisser le silence sans fin d'aujourd'hui.
+ */
+export const CAPTURE_TIMEOUT_MS = 8000;
+
+/**
+ * Fait la course entre `capture` (la promesse de captureContext()) et un délai de
+ * `timeoutMs`. Ne rejette et ne lève jamais : une capture qui n'arrive jamais est un
+ * chemin de désactivation calme, pas une erreur, donc pas un rejet non géré.
+ *
+ * Une fois le délai écoulé, `capture` peut encore se résoudre plus tard (rien ne
+ * l'annule : une Promise ne s'annule pas) — mais cette résolution tardive ne change
+ * plus jamais le résultat déjà rendu ni ne relance de log : le drapeau `settled`
+ * l'ignore. Symétriquement, dès que `capture` se résout la première, le minuteur est
+ * annulé : il ne reste jamais actif pour la durée de vie de la page derrière une
+ * capture réussie.
+ */
+export function raceCaptureAgainstTimeout(
+  capture: Promise<unknown>,
+  timeoutMs: number,
+): Promise<CaptureRaceOutcome> {
+  return new Promise(resolve => {
+    let settled = false;
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve({ status: 'timed-out' });
+    }, timeoutMs);
+
+    capture.then(context => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ status: 'captured', context });
+    });
+  });
+}
+
 // Suffixe unique par bridge construit. Sous la convention "un seul emplacement par
 // espace de nom" de d3/iD, un espace de nom fixe (littéral) partagé entre deux bridges
 // construits sur le même contexte ferait que le second remplace silencieusement les
@@ -77,9 +141,9 @@ export function captureContext(): Promise<unknown> {
           try {
             if (hasFrozenCoreContext(value)) {
               console.log(
-                "[cadastre-id] coreContext est une propriete figee (non configurable, " +
-                "non inscriptible) : capture desactivee, l'editeur demarre normalement " +
-                "sans le greffon.",
+                "[cadastre-id] désactivé : coreContext est une propriété figée (non " +
+                "configurable, non inscriptible) ; l'éditeur démarre normalement sans " +
+                `le greffon. ${DISABLE_HINT}`,
               );
               exposed = value;
               return;

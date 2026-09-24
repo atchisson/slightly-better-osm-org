@@ -1,17 +1,37 @@
-import { captureContext, makeBridge } from './bridge/capture';
+import {
+  captureContext, makeBridge, raceCaptureAgainstTimeout, CAPTURE_TIMEOUT_MS, DISABLE_HINT,
+} from './bridge/capture';
 import { createMode } from './mode';
 import { createButton } from './ui/button';
 import type { LonLat } from './geometry/types';
 
 const log = (...a: unknown[]) => console.log('[cadastre-id]', ...a);
 
+// Tout premier acte du script, avant le moindre `await` — voir le spike du
+// 2026-09-23 (spike/probe.user.js), qui journalisait son injection en tout premier
+// pour cette même raison, et qui est resté diagnosticable dès le premier essai grâce
+// à ça. Sans cette ligne, un script qui ne tourne jamais dans un document donné et un
+// script qui tourne mais reste bloqué sur la capture (voir le chien de garde plus bas)
+// sont indiscernables : silence dans les deux cas. iD tourne dans une iframe servie à
+// `/id` ; le script cible aussi `/edit` (le document parent). Savoir dans lequel des
+// deux ce point a été atteint est le premier réflexe de débogage.
+log('injecté —', location.pathname, window === window.top ? '(cadre principal)' : '(iframe)');
+
 void (async () => {
+  const capture = await raceCaptureAgainstTimeout(captureContext(), CAPTURE_TIMEOUT_MS);
+  if (capture.status === 'timed-out') {
+    console.warn(
+      `[cadastre-id] désactivé : le contexte iD n'a jamais été capturé (${CAPTURE_TIMEOUT_MS / 1000} s ` +
+      `écoulées) ; le greffon reste inactif, l'éditeur n'est pas affecté. ${DISABLE_HINT}`,
+    );
+    return;
+  }
+
   let bridge;
   try {
-    bridge = makeBridge(await captureContext());
+    bridge = makeBridge(capture.context);
   } catch (err) {
-    console.warn('[cadastre-id] désactivé :', (err as Error).message,
-      '— iD a probablement changé ; voir https://github.com/alenoir/cadastre-id');
+    console.warn('[cadastre-id] désactivé :', (err as Error).message, `— ${DISABLE_HINT}`);
     return;
   }
 
