@@ -1,24 +1,42 @@
 import { describe, it, expect, vi } from 'vitest';
-import { datasetUrl, millesimeFromUrl, downloadCommune } from '../../src/cadastre/download';
+import {
+  datasetUrl, millesimesFromListing, downloadCommune, LISTING_URL,
+} from '../../src/cadastre/download';
+
+/** Un listing S3 comme en rend le dépôt Etalab, réduit aux préfixes qui nous importent. */
+const listing = (...dates: string[]): string =>
+  `<?xml version='1.0' encoding='UTF-8'?><ListBucketResult><Name>cadastre</Name>` +
+  dates.map(d => `<CommonPrefixes><Prefix>etalab-cadastre/${d}/</Prefix></CommonPrefixes>`).join('') +
+  `</ListBucketResult>`;
 
 describe('datasetUrl', () => {
-  it('construit l’URL Etalab depuis le code INSEE', () => {
-    expect(datasetUrl('49007')).toBe(
-      'https://cadastre.data.gouv.fr/data/etalab-cadastre/latest/geojson/communes/49/49007/cadastre-49007-batiments.json.gz');
+  it('vise le bucket S3 directement, à un millésime explicite', () => {
+    // Surtout PAS cadastre.data.gouv.fr/.../latest/ : sa redirection 302 ne porte
+    // aucun en-tête CORS et le navigateur la bloque au premier saut.
+    expect(datasetUrl('49007', '2026-06-01')).toBe(
+      'https://cadastre.s3.rbx.io.cloud.ovh.net/etalab-cadastre/2026-06-01' +
+      '/geojson/communes/49/49007/cadastre-49007-batiments.json.gz');
   });
 
   it('gère un code corse', () => {
-    expect(datasetUrl('2A004')).toContain('/communes/2A/2A004/');
+    expect(datasetUrl('2A004', '2026-06-01')).toContain('/communes/2A/2A004/');
   });
 });
 
-describe('millesimeFromUrl', () => {
-  it('extrait l’année du chemin daté', () => {
-    expect(millesimeFromUrl('https://x/etalab-cadastre/2026-06-01/geojson/communes/49/…')).toBe('2026');
+describe('millesimesFromListing', () => {
+  it('rend les millésimes du plus récent au plus ancien', () => {
+    // Format AAAA-MM-JJ : l'ordre lexicographique est l'ordre chronologique.
+    expect(millesimesFromListing(listing('2025-12-01', '2026-06-01', '2026-03-01')))
+      .toEqual(['2026-06-01', '2026-03-01', '2025-12-01']);
+  });
+
+  it('dédoublonne', () => {
+    expect(millesimesFromListing(listing('2026-06-01', '2026-06-01'))).toEqual(['2026-06-01']);
   });
 
   it('jette plutôt que d’inventer un millésime', () => {
-    expect(() => millesimeFromUrl('https://x/etalab-cadastre/latest/geojson/…')).toThrow(/millésime/i);
+    expect(() => millesimesFromListing('<ListBucketResult></ListBucketResult>'))
+      .toThrow(/millésime/i);
   });
 });
 
@@ -34,66 +52,101 @@ describe('downloadCommune', () => {
     return new Response(stream).arrayBuffer();
   };
 
-  it('décompresse le flux et rend features et millésime', async () => {
-    const body = await gzip(JSON.stringify({ features: [{ a: 1 }, { a: 2 }] }));
-    const fetchFn = vi.fn().mockResolvedValue({
-      ok: true,
-      url: 'https://cadastre.data.gouv.fr/data/etalab-cadastre/2026-06-01/geojson/communes/49/49007/x.json.gz',
-      body: new Blob([body]).stream(),
+  /**
+   * Un dépôt simulé : le listing d'abord, puis les objets. `absentes` nomme les
+   * millésimes où la commande rend 404, pour jouer la republication en cours.
+   */
+  const depot = async (
+    dates: string[],
+    features: unknown[] = [{ a: 1 }],
+    absentes: string[] = [],
+  ) => {
+    const body = await gzip(JSON.stringify({ features }));
+    return vi.fn().mockImplementation(async (url: string) => {
+      if (url === LISTING_URL) return { ok: true, status: 200, text: async () => listing(...dates) };
+      if (absentes.some(d => url.includes(`/${d}/`))) return { ok: false, status: 404 };
+      return { ok: true, status: 200, body: new Blob([body]).stream() };
     }) as unknown as typeof fetch;
+  };
+
+  it('décompresse le flux et rend features et millésime', async () => {
+    const fetchFn = await depot(['2026-06-01'], [{ a: 1 }, { a: 2 }]);
 
     const r = await downloadCommune('49007', fetchFn);
+
     expect(r.features).toHaveLength(2);
+    // L'attribution porte l'année, convention des imports cadastre français.
     expect(r.millesime).toBe('2026');
   });
 
-  it('signale une commune absente du jeu', async () => {
-    const fetchFn = vi.fn().mockResolvedValue({ ok: false, status: 404, url: '' }) as unknown as typeof fetch;
-    await expect(downloadCommune('49999', fetchFn)).rejects.toThrow(/404/);
+  it('prend le millésime le plus récent du dépôt', async () => {
+    const fetchFn = await depot(['2024-01-01', '2026-06-01', '2025-09-01']);
+
+    await downloadCommune('49007', fetchFn);
+
+    const urls = (fetchFn as unknown as { mock: { calls: string[][] } }).mock.calls.map(c => c[0]);
+    expect(urls.some(u => u?.includes('/2026-06-01/'))).toBe(true);
   });
 
-  it('recolle les vingt arrondissements pour Paris', async () => {
-    const body = await gzip(JSON.stringify({ features: [{ a: 1 }] }));
-    const fetchFn = vi.fn().mockImplementation(async (url: string) => ({
-      ok: true,
-      url: url.replace('/latest/', '/2026-06-01/'),
-      body: new Blob([body]).stream(),
-    })) as unknown as typeof fetch;
+  it('signale une commune absente de tout le dépôt', async () => {
+    const fetchFn = await depot(['2026-06-01'], [{ a: 1 }], ['2026-06-01']);
 
-    const r = await downloadCommune('75056', fetchFn);
-    expect(fetchFn).toHaveBeenCalledTimes(20);
-    expect(r.features).toHaveLength(20);
-    expect(r.millesime).toBe('2026');
-    // c'est bien le code arrondissement qui est demandé, jamais 75056
-    for (const [url] of (fetchFn as unknown as { mock: { calls: string[][] } }).mock.calls) {
-      expect(url).not.toContain('75056');
-    }
+    await expect(downloadCommune('49999', fetchFn)).rejects.toThrow(/absent/i);
   });
 
-  // Le millésime porté par l'objet créé est une obligation d'attribution (Licence
-  // Ouverte). Pour Paris, Lyon et Marseille il était pris sur `parts[0]`, c'est-à-dire
-  // sur le PREMIER arrondissement : si Etalab republie les arrondissements à des dates
-  // différentes, l'attribution est fausse pour dix-neuf sur vingt — et fausse dans le
-  // sens le plus gênant, en annonçant des données plus fraîches qu'elles ne sont.
-  it('retient le millésime le plus ancien quand les arrondissements divergent', async () => {
+  it('remonte telle quelle une panne qui n’est pas une absence', async () => {
+    const fetchFn = vi.fn().mockImplementation(async (url: string) => (
+      url === LISTING_URL
+        ? { ok: true, status: 200, text: async () => listing('2026-06-01') }
+        : { ok: false, status: 500 }
+    )) as unknown as typeof fetch;
+
+    // Un 500 n'est pas une republication en cours : essayer le millésime précédent
+    // masquerait une panne du dépôt derrière des données périmées.
+    await expect(downloadCommune('49007', fetchFn)).rejects.toThrow(/500/);
+  });
+
+  it('se replie sur le millésime précédent quand le plus récent est incomplet', async () => {
     const espion = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const body = await gzip(JSON.stringify({ features: [{ a: 1 }] }));
-      const fetchFn = vi.fn().mockImplementation(async (url: string) => ({
-        ok: true,
-        // le 1er arrondissement est republié en 2026, les autres datent de 2024
-        url: url.replace('/latest/', url.includes('75101') ? '/2026-06-01/' : '/2024-01-01/'),
-        body: new Blob([body]).stream(),
-      })) as unknown as typeof fetch;
+      // On perd `latest`, qu'Etalab ne fait pointer que sur un millésime entièrement
+      // publié : le listing brut expose aussi celui en cours de téléversement.
+      const fetchFn = await depot(['2025-12-01', '2026-06-01'], [{ a: 1 }], ['2026-06-01']);
 
-      const r = await downloadCommune('75056', fetchFn);
+      const r = await downloadCommune('49007', fetchFn);
 
-      expect(r.millesime).toBe('2024');
-      // La divergence est dite, pas seulement absorbée : elle signale un jeu de données
-      // en cours de republication.
-      expect(espion).toHaveBeenCalledWith(expect.stringContaining('millésime'), expect.anything());
+      expect(r.millesime).toBe('2025');
+      expect(espion).toHaveBeenCalledWith(expect.stringContaining('republication'));
     } finally {
       espion.mockRestore();
     }
+  });
+
+  it('recolle les vingt arrondissements pour Paris', async () => {
+    const fetchFn = await depot(['2026-06-01']);
+
+    const r = await downloadCommune('75056', fetchFn);
+
+    const urls = (fetchFn as unknown as { mock: { calls: string[][] } }).mock.calls
+      .map(c => c[0]!).filter(u => u !== LISTING_URL);
+    expect(urls).toHaveLength(20);
+    expect(r.features).toHaveLength(20);
+    // c'est bien le code arrondissement qui est demandé, jamais 75056
+    for (const url of urls) expect(url).not.toContain('75056');
+  });
+
+  it('sert les vingt arrondissements depuis un seul millésime', async () => {
+    const fetchFn = await depot(['2025-12-01', '2026-06-01']);
+
+    await downloadCommune('75056', fetchFn);
+
+    // En épinglant un préfixe unique, la divergence de millésimes entre
+    // arrondissements devient impossible PAR CONSTRUCTION. La version précédente
+    // suivait `latest` et redirigeait chaque arrondissement indépendamment : elle ne
+    // pouvait que détecter la divergence après coup et retenir la date la plus
+    // ancienne, pour ne jamais annoncer des données plus fraîches qu'elles ne sont.
+    const urls = (fetchFn as unknown as { mock: { calls: string[][] } }).mock.calls
+      .map(c => c[0]!).filter(u => u !== LISTING_URL);
+    expect(urls.every(u => u.includes('/2026-06-01/'))).toBe(true);
   });
 });

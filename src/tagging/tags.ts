@@ -12,15 +12,15 @@ const SOURCE_PREFIX =
  * Ce module porte la seule obligation légale du projet : la Licence Ouverte exige que
  * l'origine ET le millésime des données figurent sur chaque objet qui en dérive. La
  * garde précédente (`if (!input.millesime)`) ne rejetait que la chaîne vide : une
- * chaîne d'espaces, un `latest` laissé passer par une future variante de
- * `millesimeFromUrl`, ou n'importe quel texte, se serait glissé dans l'attribution de
+ * chaîne d'espaces, un `latest` laissé passer par une future variante de la lecture
+ * du millésime, ou n'importe quel texte, se serait glissé dans l'attribution de
  * CHAQUE objet créé — « Mise à jour :    », lisible par personne et invérifiable.
  *
  * Volontairement strict, et sans rattrapage : on ne `trim()` pas une valeur suspecte
- * pour la sauver. Le millésime vient du chemin de redirection d'Etalab
- * (`/etalab-cadastre/2026-06-01/`), d'où `millesimeFromUrl` extrait déjà exactement
- * quatre chiffres ; tout le reste signale que la chaîne n'a pas l'origine annoncée, et
- * il vaut mieux refuser de créer que publier une attribution fausse.
+ * pour la sauver. Le millésime vient d'un préfixe daté du dépôt Etalab
+ * (`etalab-cadastre/2026-06-01/`), dont `downloadCommune` ne garde que l'année ; tout
+ * le reste signale que la chaîne n'a pas l'origine annoncée, et il vaut mieux refuser
+ * de créer que publier une attribution fausse.
  */
 function requireMillesime(millesime: string): string {
   if (!/^\d{4}$/.test(millesime)) {

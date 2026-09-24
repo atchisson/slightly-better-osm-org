@@ -79,9 +79,11 @@ d'autre que lire et manipuler la page d'édition elle-même.
 
 ## Attribution des données
 
-Les bâtiments proviennent des fichiers cadastre par commune publiés sur
-[data.gouv.fr](https://www.data.gouv.fr/) (`cadastre.data.gouv.fr`), la plateforme des
-données publiques françaises portée par Etalab/DINUM, eux-mêmes issus du Plan
+Les bâtiments proviennent des fichiers cadastre par commune publiés par Etalab/DINUM
+sur [data.gouv.fr](https://www.data.gouv.fr/), la plateforme des données publiques
+françaises — lus directement sur le stockage objet qui les héberge, car la
+redirection de `cadastre.data.gouv.fr` ne porte pas les en-têtes CORS qu'exige un
+navigateur. Ils sont eux-mêmes issus du Plan
 Cadastral Informatisé de la Direction Générale des Finances Publiques (DGFiP),
 diffusés sous [Licence Ouverte](https://github.com/etalab/licence-ouverte) (« Open
 Licence », publiée par Etalab et recommandée pour la publication des données

@@ -27,11 +27,28 @@ Hors périmètre v1 : les adresses, les parcelles, le mode zone, l'import en lot
 
 ### 3.1 Source
 
-`https://cadastre.data.gouv.fr/data/etalab-cadastre/latest/geojson/communes/{dep}/{insee}/cadastre-{insee}-batiments.json.gz`
+**Corrigé le 2026-09-24 — ce paragraphe affirmait le contraire de la réalité.**
 
-Vérifié le 2026-09-22 : redirige vers un stockage objet OVH renvoyant `Access-Control-Allow-Origin: *`. Donc `fetch` direct depuis osm.org, sans `GM_xmlhttpRequest`, sans proxy, sans backend.
+~~`https://cadastre.data.gouv.fr/data/etalab-cadastre/latest/geojson/communes/{dep}/{insee}/cadastre-{insee}-batiments.json.gz`~~
 
-La redirection expose le millésime dans le chemin (`/etalab-cadastre/2026-06-01/`) : c'est de là que vient l'année du tag `source`, jamais d'une constante.
+Cette URL est **inutilisable depuis un navigateur**. Elle répond `302` vers le stockage objet OVH, et cette **redirection ne porte aucun en-tête CORS** : le navigateur la bloque au premier saut, sans jamais atteindre le S3. La vérification du 2026-09-22 avait lu les en-têtes de la réponse *finale* — qui portent bien `Access-Control-Allow-Origin: *` — et conclu sur la chaîne entière. Seul un lancement réel l'a démenti (« CORS missing allow origin » en console, le 2026-09-24), reconfirmé en ligne de commande : le `302` ne porte que `location` et `strict-transport-security`.
+
+Le dépôt est donc atteint **directement** :
+
+`https://cadastre.s3.rbx.io.cloud.ovh.net/etalab-cadastre/{millésime}/geojson/communes/{dep}/{insee}/cadastre-{insee}-batiments.json.gz`
+
+Le millésime ne peut plus être lu dans l'URL d'arrivée d'une redirection qu'on ne suit plus. Il vient du listing du bucket, qui répond `Access-Control-Allow-Origin: *` :
+
+`https://cadastre.s3.rbx.io.cloud.ovh.net/?list-type=2&prefix=etalab-cadastre/&delimiter=/`
+
+`delimiter=/` ne rend que les préfixes de premier niveau — une trentaine de dates `AAAA-MM-JJ`, dont l'ordre lexicographique est l'ordre chronologique. On retient la plus récente, et l'année de cette date alimente le tag `source`, jamais une constante.
+
+Deux conséquences, l'une gagnée et l'autre perdue :
+
+- **Gagnée** : en épinglant un préfixe unique pour toute une requête, la divergence de millésimes entre arrondissements de Paris, Lyon et Marseille devient impossible par construction. Le §3 précédent la détectait après coup ; on l'empêche maintenant.
+- **Perdue** : `latest` était curé par Etalab et ne pointait que sur un millésime entièrement publié, alors que le listing brut expose aussi celui en cours de téléversement. D'où un repli sur le millésime précédent quand le plus récent rend `404` — et seulement dans ce cas.
+
+`fetch` direct depuis osm.org reste la conclusion : sans `GM_xmlhttpRequest`, sans proxy, sans backend.
 
 Résolution du code INSEE : `https://geo.api.gouv.fr/communes?lat=&lon=&fields=code` (vérifié : `access-control-allow-origin: https://www.openstreetmap.org`).
 
