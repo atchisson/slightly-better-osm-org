@@ -37,6 +37,24 @@ export interface IdBridge {
   prefillChangeset(comment: string, source: string): void;
   containerNode(): HTMLElement;
   /**
+   * Attend que la carte d'iD ait fini de s'initialiser — concrètement, que la surface
+   * lue par `surfaceNode()` existe réellement dans le DOM — avant de résoudre. Borné :
+   * résout `false` si l'attente expire plutôt que de rester en suspens indéfiniment. Ne
+   * rejette et ne lève jamais.
+   *
+   * Raison d'être : l'amorçage d'osm.org est
+   * `iD.coreContext().containerNode(container).init()`, une seule chaîne synchrone.
+   * `captureContext()` résout dès l'appel de `coreContext()` — avant `.init()`. Un
+   * appelant qui utiliserait `surfaceNode()` juste après la capture, sans attendre ce
+   * signal, peut donc s'exécuter avant que `init()` n'ait fini de construire la carte :
+   * `surfaceNode()` retombe alors sur son repli (le conteneur entier), et tout ce qui en
+   * dépend — survol, conversion écran -> coordonnées — est décalé pour toute la session,
+   * en silence. Ce correctif fait suite à I1 : la fermeture précédente (`surfaceNode()`
+   * qui dit son repli en console) déplaçait le symptôme, elle ne fermait pas la porte
+   * par laquelle il arrivait.
+   */
+  whenSurfaceReady(): Promise<boolean>;
+  /**
    * L'élément dont le coin supérieur gauche **est** l'origine de `project()`.
    *
    * Source de vérité unique de la projection. Le conteneur d'iD (`containerNode`) est la

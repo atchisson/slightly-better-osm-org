@@ -1,5 +1,6 @@
 import {
-  captureContext, makeBridge, raceCaptureAgainstTimeout, CAPTURE_TIMEOUT_MS, DISABLE_HINT,
+  captureContext, makeBridge, raceCaptureAgainstTimeout, CAPTURE_TIMEOUT_MS,
+  SURFACE_READY_TIMEOUT_MS, DISABLE_HINT,
 } from './bridge/capture';
 import { createMode } from './mode';
 import { createButton } from './ui/button';
@@ -32,6 +33,26 @@ void (async () => {
     bridge = makeBridge(capture.context);
   } catch (err) {
     console.warn('[cadastre-id] désactivé :', (err as Error).message, `— ${DISABLE_HINT}`);
+    return;
+  }
+
+  // L'amorçage d'osm.org est `iD.coreContext().containerNode(container).init()`, une
+  // seule chaîne synchrone. captureContext() résout dès l'appel de coreContext() — AVANT
+  // `.init()`. Sans cette attente, tout ce qui suit (mode, écouteurs, bouton) pouvait
+  // s'installer avant que la carte n'ait fini de se construire : `surfaceNode()`
+  // retombait alors sur son repli container-entier, décalant l'origine de la projection
+  // pour toute la session, en silence. Voir bridge/types.ts (whenSurfaceReady) et
+  // bridge/capture.ts (waitForSurface) pour le détail. Rien n'est câblé — ni le mode, ni
+  // les écouteurs, ni le bouton — avant que ce signal ne soit au vert, exactement comme
+  // pour les deux autres chemins de désactivation ci-dessus : si l'attente expire,
+  // l'utilisatrice ne voit tout simplement jamais apparaître le bouton.
+  const surfaceReady = await bridge.whenSurfaceReady();
+  if (!surfaceReady) {
+    console.warn(
+      "[cadastre-id] désactivé : la surface de carte n'est jamais apparue dans le conteneur " +
+      `d'iD (${SURFACE_READY_TIMEOUT_MS / 1000} s écoulées) ; le greffon reste inactif, ` +
+      `l'éditeur n'est pas affecté. ${DISABLE_HINT}`,
+    );
     return;
   }
 

@@ -37,6 +37,22 @@ export type CaptureRaceOutcome =
 export const CAPTURE_TIMEOUT_MS = 8000;
 
 /**
+ * Délai avant d'abandonner l'attente de `svg.surface` dans le conteneur d'iD.
+ *
+ * Bien plus court que CAPTURE_TIMEOUT_MS, et c'est voulu : ce délai-ci démarre APRÈS que
+ * `coreContext()` a déjà été appelé, donc après que le (gros) bundle d'iD a déjà fini de
+ * charger — ce n'est plus ce coût-là qu'il faut couvrir. Ce qui reste entre l'appel de
+ * `coreContext()` et l'apparition de `svg.surface` est la construction synchrone du DOM
+ * de la carte par `init()`, tout au plus étalée sur quelques tours de la boucle
+ * d'animation (rendu piloté par requestAnimationFrame, ~16 ms chacun). 5 s, c'est deux à
+ * trois ordres de grandeur au-dessus de ce que ça devrait coûter même sur une machine
+ * lente, tout en restant assez court pour qu'une rupture structurelle réelle (iD a
+ * renommé ou déplacé sa surface SVG) se voie en console en quelques secondes plutôt que
+ * de laisser le greffon paraître accroché indéfiniment.
+ */
+export const SURFACE_READY_TIMEOUT_MS = 5000;
+
+/**
  * Fait la course entre `capture` (la promesse de captureContext()) et un délai de
  * `timeoutMs`. Ne rejette et ne lève jamais : une capture qui n'arrive jamais est un
  * chemin de désactivation calme, pas une erreur, donc pas un rejet non géré.
@@ -67,6 +83,72 @@ export function raceCaptureAgainstTimeout(
       clearTimeout(timer);
       resolve({ status: 'captured', context });
     });
+  });
+}
+
+/**
+ * Attend que `svg.surface` apparaisse quelque part sous `container`, borné par
+ * `timeoutMs`. Résout `true` dès que trouvé, `false` si le délai s'écoule d'abord — ne
+ * rejette et ne lève JAMAIS, pour la même raison que `raceCaptureAgainstTimeout` : une
+ * exception qui remonterait vers l'amorçage d'iD l'a déjà cassé une fois pendant le
+ * spike (voir hasFrozenCoreContext plus haut), et cette fonction tourne exactement dans
+ * cette fenêtre-là, juste après que coreContext() a été appelé.
+ *
+ * Pourquoi ceci existe : `iD.coreContext().containerNode(container).init()` s'exécute en
+ * une seule chaîne synchrone lors de l'amorçage d'osm.org. `captureContext()` résout dès
+ * que `coreContext()` est APPELÉ — avant que `.containerNode(container)` et `.init()`
+ * n'aient eu lieu. Comme la continuation de notre `await` ne reprend qu'en microtâche,
+ * une fois cette chaîne synchrone terminée, on pourrait croire `init()` déjà fini à ce
+ * moment-là — mais rien ne garantit que le rendu de la carte (et donc la création de
+ * `svg.surface`) soit lui-même synchrone à l'intérieur d'`init()`. En pratique
+ * (confirmé par un lancement réel), il ne l'est pas complètement : `surfaceNode()`
+ * retombait sur son repli alors même qu'une commande tapée à la main, un instant plus
+ * tard, trouvait l'élément. D'où cette attente bornée, plutôt qu'une simple hypothèse de
+ * synchronicité.
+ *
+ * Préfère un MutationObserver à un sondage : la construction du DOM de la carte est un
+ * événement (des nœuds apparaissent), pas un état à interroger à intervalles arbitraires
+ * ; observer directement l'arrivée du bon nœud élimine tout compromis entre latence de
+ * détection et coût de sondage répété. L'observateur est TOUJOURS déconnecté avant que
+ * cette fonction ne résolve — succès ou délai écoulé — pour ne jamais laisser un
+ * observateur vivre au-delà de sa propre réponse sur un conteneur qui, lui, survit pour
+ * toute la session d'édition.
+ */
+export function waitForSurface(container: unknown, timeoutMs: number): Promise<boolean> {
+  const canQuery = (node: unknown): node is Element =>
+    !!node && typeof (node as { querySelector?: unknown }).querySelector === 'function';
+  const found = (): boolean => canQuery(container) && !!container.querySelector('svg.surface');
+
+  return new Promise(resolve => {
+    if (found()) { resolve(true); return; }
+
+    let settled = false;
+    let observer: MutationObserver | undefined;
+
+    const finish = (result: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        observer?.disconnect();
+      } catch {
+        /* la déconnexion est un nettoyage, pas une condition de la réponse déjà rendue */
+      }
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => finish(false), timeoutMs);
+
+    try {
+      if (canQuery(container) && typeof MutationObserver === 'function') {
+        observer = new MutationObserver(() => {
+          if (found()) finish(true);
+        });
+        observer.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+      }
+    } catch {
+      /* pas d'observation possible ici : le minuteur seul tranchera, jamais d'exception */
+    }
   });
 }
 
@@ -451,6 +533,15 @@ function buildBridge(c: any): IdBridge {
 
     containerNode(): HTMLElement {
       return c.container().node() as HTMLElement;
+    },
+
+    whenSurfaceReady(): Promise<boolean> {
+      // Voir waitForSurface plus haut pour le pourquoi. Le conteneur est relu ICI (pas
+      // mis en cache dans une fermeture au moment de construire le bridge) : appeler
+      // c.container() une seconde fois coûte une lecture triviale, et ça évite de
+      // supposer que rien ne remplace jamais le nœud conteneur entre la construction du
+      // bridge et cet appel.
+      return waitForSurface(c.container().node(), SURFACE_READY_TIMEOUT_MS);
     },
 
     surfaceNode(): Element {

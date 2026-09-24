@@ -39,6 +39,7 @@ describe('chargement par défaut — le cache ne peut jamais faire échouer le c
       createBuilding: () => {},
       prefillChangeset: vi.fn(),
       containerNode: () => container,
+      whenSurfaceReady: () => Promise.resolve(true),
       surfaceNode: () => container,
     };
   });

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { captureContext, makeBridge, raceCaptureAgainstTimeout } from '../../src/bridge/capture';
+import { captureContext, makeBridge, raceCaptureAgainstTimeout, waitForSurface } from '../../src/bridge/capture';
 
 describe('captureContext', () => {
   beforeEach(() => {
@@ -716,6 +716,94 @@ describe('raceCaptureAgainstTimeout', () => {
 
       await expect(outcomePromise).resolves.toEqual({ status: 'timed-out' });
     } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// I1 (le retour) : le premier correctif avait fait dire à surfaceNode() son repli en
+// console, mais rien n'empêchait encore d'appeler surfaceNode() avant que
+// `iD.coreContext().containerNode(container).init()` (l'amorçage réel d'osm.org) n'ait
+// fini de construire la carte — captureContext() résout dès l'appel de coreContext(),
+// PAS après .init(). waitForSurface() est l'attente bornée qui ferme cette porte-là.
+describe('waitForSurface — attendre que la carte d’iD ait fini de s’initialiser', () => {
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const uneSurface = (): SVGElement => {
+    const el = document.createElementNS(SVG_NS, 'svg');
+    el.setAttribute('class', 'surface');
+    return el as unknown as SVGElement;
+  };
+
+  it('résout tout de suite (true) quand la surface est déjà là', async () => {
+    const conteneur = document.createElement('div');
+    conteneur.appendChild(uneSurface());
+
+    // Délai volontairement long : si l'implémentation attendait quand même le
+    // minuteur au lieu de constater tout de suite que la surface existe déjà, ce
+    // test resterait bloqué et échouerait par timeout — la preuve recherchée.
+    await expect(waitForSurface(conteneur, 30000)).resolves.toBe(true);
+  });
+
+  it('résout (true) quand la surface apparaît après un court délai, sans attendre l’échéance', async () => {
+    const conteneur = document.createElement('div');
+    const debut = Date.now();
+
+    setTimeout(() => conteneur.appendChild(uneSurface()), 20);
+
+    // Échéance large (2000 ms) par rapport au délai réel d'apparition (20 ms) : si la
+    // résolution ne venait que du minuteur plutôt que du MutationObserver, ce test
+    // mesurerait une latence proche de 2000 ms plutôt que de quelques dizaines de ms.
+    await expect(waitForSurface(conteneur, 2000)).resolves.toBe(true);
+    expect(Date.now() - debut).toBeLessThan(1000);
+  });
+
+  it('résout (false) une fois l’échéance passée, si la surface n’apparaît jamais', async () => {
+    vi.useFakeTimers();
+    try {
+      const conteneur = document.createElement('div'); // ne recevra jamais de surface
+      const outcome = waitForSurface(conteneur, 5000);
+      await vi.advanceTimersByTimeAsync(5000);
+      await expect(outcome).resolves.toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Garantie « jamais lever » : un conteneur qui n'est pas un Element interrogeable
+  // (capture avortée, forme inattendue) ne doit ni lever de façon synchrone au moment
+  // de l'appel, ni faire rejeter la promesse — seulement se rabattre sur le délai.
+  it('ne lève jamais et finit par résoudre (false) si le conteneur n’est pas interrogeable', async () => {
+    vi.useFakeTimers();
+    try {
+      let outcome!: Promise<boolean>;
+      expect(() => { outcome = waitForSurface(undefined, 5000); }).not.toThrow();
+      await vi.advanceTimersByTimeAsync(5000);
+      await expect(outcome).resolves.toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Ni fuite : l'observateur DOM posé sur le conteneur d'iD (qui, lui, survit toute la
+  // session d'édition) doit être démonté dès que waitForSurface a tranché — succès ou
+  // échéance — jamais laissé actif derrière une réponse déjà rendue.
+  it('déconnecte son MutationObserver dès qu’il a tranché, succès ou échéance', async () => {
+    const disconnectEspion = vi.spyOn(MutationObserver.prototype, 'disconnect');
+    try {
+      const conteneurSucces = document.createElement('div');
+      const succes = waitForSurface(conteneurSucces, 2000);
+      setTimeout(() => conteneurSucces.appendChild(uneSurface()), 10);
+      await expect(succes).resolves.toBe(true);
+      expect(disconnectEspion).toHaveBeenCalledTimes(1);
+
+      vi.useFakeTimers();
+      const conteneurEchec = document.createElement('div');
+      const echec = waitForSurface(conteneurEchec, 5000);
+      await vi.advanceTimersByTimeAsync(5000);
+      await expect(echec).resolves.toBe(false);
+      expect(disconnectEspion).toHaveBeenCalledTimes(2);
+    } finally {
+      disconnectEspion.mockRestore();
       vi.useRealTimers();
     }
   });
