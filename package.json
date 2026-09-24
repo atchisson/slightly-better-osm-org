@@ -10,9 +10,9 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
+    "vitest": "^5.0.1",
     "fake-indexeddb": "^6.0.0",
     "jsdom": "^26.0.0",
     "@types/node": "^22.10.0"
