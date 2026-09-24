@@ -120,6 +120,6 @@ void (async () => {
     void mode.clickAt(toLonLat(e as MouseEvent));
   });
 
-  createButton(container, on => (on ? mode.enable() : mode.disable()));
+  createButton(container, surface, on => (on ? mode.enable() : mode.disable()));
   log('prêt');
 })();

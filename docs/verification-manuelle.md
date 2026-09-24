@@ -48,7 +48,19 @@ nouvel onglet, sans passer par la carte.
       **après** que l'éditeur est pleinement chargé. Ce message n'apparaît que si la
       capture du contexte a réussi ET que le bouton a pu être créé — son absence,
       seule, est un signal valide d'échec, pas un faux négatif à ignorer.
-- [ ] Le bouton **Cadastre** est présent dans l'interface d'iD.
+- [ ] Le bouton **Cadastre** est **visible à l'écran**, en haut à gauche de la carte,
+      et rien ne le recouvre. « Présent dans le DOM » ne suffit pas : le bouton a
+      déjà été livré recouvert par la barre « Annuler / Rétablir / Sauvegarder »
+      d'iD — présent, `visibility:visible`, opacité 1, et pourtant invisible. En cas
+      de doute, dans la console du cadre `/id` :
+
+      ```js
+      const b = document.querySelector('.cadastre-id-toggle');
+      const r = b.getBoundingClientRect();
+      document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === b;
+      ```
+
+      Doit renvoyer `true`. Tout autre résultat nomme l'élément qui le recouvre.
 - [ ] Aucune erreur inattendue en console, en particulier aucune `TypeError` évoquant
       `coreContext` ou l'amorçage d'iD (voir l'avertissement ci-dessus).
 
