@@ -4,6 +4,7 @@ import {
 } from './bridge/capture';
 import { createMode } from './mode';
 import { createCtrlShortcut } from './ui/shortcut';
+import { BUILD } from './meta';
 import type { LonLat } from './geometry/types';
 
 const log = (...a: unknown[]) => console.log('[cadastre-id]', ...a);
@@ -16,7 +17,8 @@ const log = (...a: unknown[]) => console.log('[cadastre-id]', ...a);
 // sont indiscernables : silence dans les deux cas. iD tourne dans une iframe servie à
 // `/id` ; le script cible aussi `/edit` (le document parent). Savoir dans lequel des
 // deux ce point a été atteint est le premier réflexe de débogage.
-log('injecté —', location.pathname, window === window.top ? '(cadre principal)' : '(iframe)');
+log('injecté —', location.pathname,
+  window === window.top ? '(cadre principal)' : '(iframe)', '· build', BUILD);
 
 void (async () => {
   const capture = await raceCaptureAgainstTimeout(captureContext(), CAPTURE_TIMEOUT_MS);

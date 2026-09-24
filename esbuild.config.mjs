@@ -30,13 +30,34 @@ if (!meta.startsWith(BANNER_START) || !meta.includes(BANNER_END)) {
   );
 }
 
+// Horodatage de construction, à la minute. Il sert deux fois : la ligne d'injection
+// le nomme en console (savoir QUEL build s'exécute a coûté une session entière à
+// analyser une pile d'appels venue de la version précédente), et il complète le
+// numéro de version du bandeau pour que le gestionnaire de scripts distingue deux
+// installations. Quatre composantes numériques strictement croissantes : les
+// gestionnaires les comparent segment par segment.
+const d = new Date();
+/** @param {number} n */
+const p2 = (n) => String(n).padStart(2, '0');
+const stamp =
+  `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}${p2(d.getHours())}${p2(d.getMinutes())}`;
+
+const bannerVersionne = meta.replace(
+  /(\/\/ @version\s+)(\S+)/,
+  (_, prefixe, version) => `${prefixe}${version}.${stamp}`
+);
+if (bannerVersionne === meta) {
+  throw new Error("esbuild.config.mjs : aucune ligne @version trouvée dans le bandeau de src/meta.ts.");
+}
+
 await build({
   entryPoints: ['src/main.ts'],
   bundle: true,
   format: 'iife',
   target: 'es2022',
   outfile: 'dist/cadastre-id.user.js',
-  banner: { js: meta },
+  banner: { js: bannerVersionne },
+  define: { __BUILD__: JSON.stringify(stamp) },
   legalComments: 'none',
 });
 

@@ -48,6 +48,12 @@ nouvel onglet, sans passer par la carte.
       **après** que l'éditeur est pleinement chargé. Ce message n'apparaît que si la
       capture du contexte a réussi ET que le raccourci a pu être posé — son absence,
       seule, est un signal valide d'échec, pas un faux négatif à ignorer.
+- [ ] **Vérifier d'abord QUEL build s'exécute.** La ligne d'injection le nomme :
+      `[cadastre-id] injecté — /id (iframe) · build 202609241738`. Ce nombre doit
+      correspondre au `@version` du script installé dans le gestionnaire
+      (`0.1.0.<build>`). Une session entière a été passée à analyser une pile
+      d'appels qui venait de la version précédente, restée installée : ce point
+      passe avant tous les autres.
 - [ ] **Le greffon n'a aucune interface** : rien n'apparaît à l'écran tant que `Ctrl`
       n'est pas maintenu. Son seul signe de vie au repos est la ligne
       `[cadastre-id] prêt — maintenir Ctrl…` en console.
