@@ -40,6 +40,7 @@ const fauxBridge = (): IdBridge => ({
   whenSurfaceReady: () => Promise.resolve(true),
   surfaceNode: () => surface,
   toolbarSlot: () => slot,
+  cadastreVisible: () => true,
 });
 
 /**
@@ -207,6 +208,37 @@ describe('createButton — repli flottant sur la carte', () => {
 
     expect(button.style.left).toBe('10px');
     expect(button.style.top).toBe('81px');
+  });
+});
+
+describe('createButton — setOn, pour le raccourci Ctrl', () => {
+  it('arme et désarme de l’extérieur, en notifiant', () => {
+    barreDOutils();
+    const etats: boolean[] = [];
+    const { setOn, element } = createButton(fauxBridge(), on => etats.push(on));
+
+    setOn(true);
+    expect(etats).toEqual([true]);
+    expect(element.classList.contains('active')).toBe(true);
+
+    setOn(false);
+    expect(etats).toEqual([true, false]);
+    expect(element.classList.contains('active')).toBe(false);
+  });
+
+  it('est idempotent', () => {
+    barreDOutils();
+    const etats: boolean[] = [];
+    const { setOn } = createButton(fauxBridge(), on => etats.push(on));
+
+    setOn(true);
+    setOn(true);
+    setOn(false);
+    setOn(false);
+
+    // Le raccourci relâche Ctrl sur des chemins concurrents (keyup, blur) : sans
+    // idempotence, le mode serait désarmé deux fois pour un seul relâchement.
+    expect(etats).toEqual([true, false]);
   });
 });
 

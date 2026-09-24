@@ -940,3 +940,86 @@ describe('toolbarSlot — greffer dans la barre plutôt que se battre contre ell
     }
   });
 });
+
+describe('cadastreVisible — trois réponses, pas deux', () => {
+  // `context.background()` est la seule primitive lue par le projet que le spike n'a
+  // PAS vérifiée en navigateur. D'où le troisième état, `null` : « je ne sais pas ».
+  // Il conditionne le raccourci Ctrl, qui n'a aucune affordance visible — le traiter
+  // comme « oui » armerait un déclencheur invisible n'importe où.
+  const source = (id: string, nom?: string) => ({ id, name: () => nom ?? id });
+  const ctxAvecFond = (bg: unknown) => ({
+    ...ctxAvecConteneur(document.createElement('div')),
+    background: () => bg,
+  });
+
+  it('reconnaît le cadastre en fond de carte', () => {
+    const bridge = makeBridge(ctxAvecFond({
+      baseLayerSource: () => source('fr.cadastre', 'Cadastre (France)'),
+      overlayLayerSources: () => [],
+    }));
+
+    expect(bridge.cadastreVisible()).toBe(true);
+  });
+
+  it('reconnaît le cadastre en calque superposé', () => {
+    // Le cadastre est proposé des deux façons dans l'index d'imagerie d'iD : ne
+    // regarder que le fond de carte raterait l'usage le plus courant, le calque
+    // par-dessus une ortho.
+    const bridge = makeBridge(ctxAvecFond({
+      baseLayerSource: () => source('Bing', 'Bing aerial imagery'),
+      overlayLayerSources: () => [source('fr.cadastre.2024', 'Cadastre 2024')],
+    }));
+
+    expect(bridge.cadastreVisible()).toBe(true);
+  });
+
+  it('reconnaît sur le nom seul, id illisible', () => {
+    // Correspondance sur le nom ET l'identifiant : l'index d'imagerie est un dépôt
+    // tiers qui renomme ses entrées, un identifiant figé ici se périmerait en silence.
+    const bridge = makeBridge(ctxAvecFond({
+      baseLayerSource: () => ({ id: 'x-42', name: () => 'Plan cadastral informatisé' }),
+      overlayLayerSources: () => [],
+    }));
+
+    expect(bridge.cadastreVisible()).toBe(true);
+  });
+
+  it('rend false quand aucune source ne parle de cadastre', () => {
+    const bridge = makeBridge(ctxAvecFond({
+      baseLayerSource: () => source('Bing', 'Bing aerial imagery'),
+      overlayLayerSources: () => [source('osm-gps', 'Traces GPS')],
+    }));
+
+    expect(bridge.cadastreVisible()).toBe(false);
+  });
+
+  it('rend null — jamais false — quand background() est absent', () => {
+    const bridge = makeBridge(ctxAvecConteneur(document.createElement('div')));
+
+    // Distinction porteuse : `false` désarme le raccourci sur un état connu, `null`
+    // le supprime entièrement et le dit en console.
+    expect(bridge.cadastreVisible()).toBeNull();
+  });
+
+  it('rend null quand background() n’a pas la forme attendue', () => {
+    expect(makeBridge(ctxAvecFond({})).cadastreVisible()).toBeNull();
+    expect(makeBridge(ctxAvecFond(null)).cadastreVisible()).toBeNull();
+  });
+
+  it('rend null quand la lecture jette', () => {
+    const bridge = makeBridge(ctxAvecFond({
+      baseLayerSource: () => { throw new Error('boum'); },
+    }));
+
+    expect(bridge.cadastreVisible()).toBeNull();
+  });
+
+  it('juge sur l’id quand le nom jette', () => {
+    const bridge = makeBridge(ctxAvecFond({
+      baseLayerSource: () => ({ id: 'fr.cadastre', name: () => { throw new Error('boum'); } }),
+      overlayLayerSources: () => [],
+    }));
+
+    expect(bridge.cadastreVisible()).toBe(true);
+  });
+});

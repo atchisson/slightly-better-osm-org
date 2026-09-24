@@ -181,15 +181,22 @@ function grefferDansLaBarre(slot: ToolbarSlot, button: HTMLButtonElement): Place
  * repli n'est pas décoratif : il est ce qui reste si iD renomme ses classes, et il
  * se signale en console (voir `toolbarSlot()` dans le bridge).
  *
- * @returns le bouton et son `destroy`, sur le modèle de `createOverlay`. Le
- *          placement flottant s'abonne à la fenêtre et à la surface, il doit
- *          pouvoir s'en détacher. `src/main.ts` ne l'appelle pas — le bouton vit
- *          autant que la page ; les tests, eux, en ont besoin.
+ * @returns le bouton, `setOn` pour l'armer de l'extérieur, et `destroy`.
+ *
+ *          `setOn` existe pour que le raccourci Ctrl (`createCtrlShortcut`) passe
+ *          PAR le bouton au lieu de parler au mode directement : un seul état
+ *          d'armement, donc jamais de mode armé avec un bouton éteint. Il est
+ *          idempotent — réarmer un bouton déjà armé ne renotifie pas.
+ *
+ *          `destroy` suit le modèle de `createOverlay` : le placement flottant
+ *          s'abonne à la fenêtre et à la surface, il doit pouvoir s'en détacher.
+ *          `src/main.ts` ne l'appelle pas — le bouton vit autant que la page ; les
+ *          tests, eux, en ont besoin.
  */
 export function createButton(
   bridge: IdBridge,
   onToggle: (on: boolean) => void,
-): { element: HTMLButtonElement; destroy: () => void } {
+): { element: HTMLButtonElement; setOn: (on: boolean) => void; destroy: () => void } {
   const button = document.createElement('button');
   button.className = 'cadastre-id-toggle';
   button.type = 'button';
@@ -201,11 +208,13 @@ export function createButton(
   placement.setActive(false);
 
   let on = false;
-  button.addEventListener('click', () => {
-    on = !on;
+  const setOn = (next: boolean): void => {
+    if (next === on) return;
+    on = next;
     placement.setActive(on);
     onToggle(on);
-  });
+  };
+  button.addEventListener('click', () => setOn(!on));
 
-  return { element: button, destroy: placement.destroy };
+  return { element: button, setOn, destroy: placement.destroy };
 }

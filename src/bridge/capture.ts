@@ -632,5 +632,54 @@ function buildBridge(c: any): IdBridge {
       while (item.parentElement && item.parentElement !== barre) item = item.parentElement;
       return { item, bouton };
     },
+
+    cadastreVisible(): boolean | null {
+      // `context.background()` n'a PAS été vérifié par le spike, contrairement aux
+      // autres primitives lues ici. Tout est donc gardé, et l'échec rend `null` —
+      // « je ne sais pas » — que l'appelant ne doit jamais confondre avec « non ».
+      try {
+        const bg = (c as { background?: () => unknown }).background?.();
+        if (!bg) return null;
+        const b = bg as {
+          baseLayerSource?: () => unknown;
+          overlayLayerSources?: () => unknown[];
+        };
+        const sources: unknown[] = [];
+        if (typeof b.baseLayerSource === 'function') sources.push(b.baseLayerSource());
+        if (typeof b.overlayLayerSources === 'function') sources.push(...b.overlayLayerSources());
+        if (sources.length === 0) return null;
+        return sources.some(estCadastre);
+      } catch {
+        return null;
+      }
+    },
   };
+}
+
+/**
+ * Une source d'imagerie d'iD est-elle le cadastre ?
+ *
+ * Correspondance sur le nom et l'identifiant plutôt que sur un identifiant en dur :
+ * l'index d'imagerie d'iD est un dépôt tiers qui renomme et réorganise ses entrées,
+ * et le cadastre y est proposé sous plusieurs formes (fond de carte, calque
+ * superposé, millésimes). Un identifiant figé ici se périmerait en silence — et le
+ * silence est précisément ce qu'on ne veut pas sur la condition d'un raccourci
+ * invisible.
+ *
+ * Sur le RADICAL `cadastr`, pas sur le mot `cadastre` : la couche de référence
+ * s'appelle « Plan Cadastral Informatisé » (le PCI, d'où viennent nos données), que
+ * `cadastre` seul ne reconnaît pas. « cadastral », « cadastraux » et « cadastre »
+ * tombent tous dans ce radical.
+ */
+function estCadastre(source: unknown): boolean {
+  const s = source as { id?: unknown; name?: unknown };
+  const morceaux: string[] = [];
+  if (typeof s?.id === 'string') morceaux.push(s.id);
+  try {
+    if (typeof s?.name === 'function') {
+      const n = (s.name as () => unknown)();
+      if (typeof n === 'string') morceaux.push(n);
+    }
+  } catch { /* une source sans nom lisible reste jugeable sur son id */ }
+  return morceaux.join(' ').toLowerCase().includes('cadastr');
 }

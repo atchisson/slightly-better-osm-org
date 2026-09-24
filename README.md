@@ -54,10 +54,19 @@ d'autre que lire et manipuler la page d'édition elle-même.
 
 ## Utilisation
 
-- Sur une page d'édition d'osm.org, un bouton **Cadastre** apparaît en haut à droite
-  de la carte.
+- Sur une page d'édition d'osm.org, un bouton **Cadastre** apparaît dans la barre
+  d'outils d'iD, à côté des outils de dessin. (Si iD renomme ses classes CSS, le
+  bouton se rabat sur la carte elle-même et le dit en console.)
 - L'activer fait apparaître, au survol, le contour du bâtiment cadastral sous le
   curseur, aligné sur la couche cadastre.
+- **Raccourci :** maintenir `Ctrl` arme le mode le temps de l'appui, sans toucher au
+  bouton — mais seulement quand une couche cadastre est affichée dans iD. Cette
+  condition n'a rien à voir avec l'exactitude du tracé : la géométrie vient toujours
+  de l'API GeoJSON du cadastre, jamais de la couche affichée. Elle garantit que vous
+  **regardez** la source que vous tracez, ce qu'on exige d'un déclencheur qui n'a
+  aucune affordance visible. Si le greffon n'arrive pas à lire quelle couche est
+  affichée, il désactive le raccourci et l'annonce en console plutôt que de
+  l'autoriser partout.
 - Cliquer crée le bâtiment dans iD, sélectionné, prêt à recevoir ses tags — comme pour
   tout objet tracé à la main.
 - `Ctrl+Z` annule la création (nœuds éventuellement créés + way) en une seule

@@ -42,6 +42,7 @@ describe('chargement par défaut — le cache ne peut jamais faire échouer le c
       whenSurfaceReady: () => Promise.resolve(true),
       surfaceNode: () => container,
       toolbarSlot: () => null,
+      cadastreVisible: () => true,
     };
   });
 

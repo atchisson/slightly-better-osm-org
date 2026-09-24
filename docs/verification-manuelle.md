@@ -67,6 +67,19 @@ nouvel onglet, sans passer par la carte.
       `toolbarSlot()` (src/bridge/capture.ts) est à remettre à jour.
 - [ ] Aucune erreur inattendue en console, en particulier aucune `TypeError` évoquant
       `coreContext` ou l'amorçage d'iD (voir l'avertissement ci-dessus).
+- [ ] **Raccourci Ctrl.** `context.background()` est la seule primitive lue par le
+      projet que le spike n'a pas vérifiée en navigateur : ce point est donc le
+      premier à faire.
+      - Si la console porte `raccourci Ctrl indisponible`, l'API n'a pas la forme
+        attendue. Le greffon fonctionne au bouton ; c'est `cadastreVisible()`
+        (src/bridge/capture.ts) qui est à reprendre, sur le relevé réel.
+      - Sinon : **sans** couche cadastre affichée, maintenir `Ctrl` ne doit rien
+        armer. Avec la couche cadastre affichée (fond ou calque superposé), maintenir
+        `Ctrl` doit allumer le bouton et faire apparaître l'aperçu au survol ; le
+        relâcher doit l'éteindre.
+      - Maintenir `Ctrl`, faire `Alt+Tab`, revenir, relâcher : le bouton doit être
+        éteint. Sans le filet posé sur `blur`, le mode resterait armé et le clic
+        suivant créerait un bâtiment non demandé.
 
 ## Scénario 2 — entrée dans l'éditeur depuis la carte
 

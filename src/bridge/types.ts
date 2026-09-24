@@ -95,4 +95,28 @@ export interface IdBridge {
    * outil.
    */
   toolbarSlot(): ToolbarSlot | null;
+  /**
+   * La couche cadastre est-elle affichée dans iD ? `null` quand on ne peut pas le
+   * savoir — `context.background()` absent ou d'une forme inattendue.
+   *
+   * **Ce n'est pas une condition d'exactitude.** La géométrie vient de l'API GeoJSON
+   * du cadastre (`cadastre.data.gouv.fr`), jamais de la couche affichée : le greffon
+   * produirait exactement le même bâtiment sur un fond satellite. Ce que la couche
+   * garantit, c'est que l'utilisatrice REGARDE la source qu'elle trace et peut
+   * comparer l'aperçu au raster avant de cliquer.
+   *
+   * D'où son emploi : elle conditionne le raccourci Ctrl, qui n'a aucune affordance
+   * visible, et lui seule. Le bouton de la barre d'outils reste un acte explicite,
+   * précédé d'un aperçu — il n'a pas besoin de ce garde-fou.
+   *
+   * La détection se fait sur le NOM et l'identifiant de la source, pas sur un
+   * identifiant en dur : l'index d'imagerie d'iD renomme ses entrées, et une
+   * correspondance sur le radical « cadastr » survit à ça — elle attrape aussi
+   * « Plan Cadastral Informatisé », le nom de la couche dont viennent nos données. Elle couvre le fond de carte comme
+   * les calques superposés, puisque le cadastre est proposé des deux façons.
+   *
+   * `null` n'est jamais traité comme « oui » : un déclencheur sans affordance exige
+   * un contexte vérifié, faute de quoi le raccourci reste désactivé (et le dit).
+   */
+  cadastreVisible(): boolean | null;
 }
