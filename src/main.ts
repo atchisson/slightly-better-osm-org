@@ -1,6 +1,6 @@
 import {
   captureContext, makeBridge, raceCaptureAgainstTimeout, CAPTURE_TIMEOUT_MS,
-  SURFACE_READY_TIMEOUT_MS, DISABLE_HINT,
+  SURFACE_READY_TIMEOUT_MS, DISABLE_HINT, looksLikeIdDocument,
 } from './bridge/capture';
 import { createMode } from './mode';
 import { createButton } from './ui/button';
@@ -21,6 +21,27 @@ log('injecté —', location.pathname, window === window.top ? '(cadre principal
 void (async () => {
   const capture = await raceCaptureAgainstTimeout(captureContext(), CAPTURE_TIMEOUT_MS);
   if (capture.status === 'timed-out') {
+    // Troisième lancement réel : ce chien de garde s'arme dans TOUT document qui
+    // matche `@match`, et `window.iD` n'est jamais assigné dans le document `/edit` —
+    // iD vit dans l'iframe `/id`, `/edit` ne fait que l'héberger (spike du
+    // 2026-09-23). Sans ce test, `/edit` atteignait cette échéance à CHAQUE
+    // chargement de l'éditeur et affichait un avertissement de rupture structurelle
+    // qui n'en était pas une : un faux positif systématique, sur le document où le
+    // greffon n'a jamais eu la moindre chance de tourner. `looksLikeIdDocument`
+    // (src/bridge/capture.ts) distingue les deux : seul un document qui porte la
+    // marque HTML de l'éditeur (`#id-container`) justifie encore l'avertissement.
+    if (!looksLikeIdDocument(document)) {
+      // Délibérément `console.log`, pas `console.warn` : rien n'est cassé ici, ce
+      // document n'a jamais été candidat. Le dire une fois plutôt que se taire
+      // entièrement garde le même bénéfice diagnostique que la ligne d'injection
+      // ci-dessus — silence total et « je tourne, je me tais volontairement »
+      // doivent rester distinguables en console.
+      console.log(
+        "[cadastre-id] inactif : ce document ne porte pas la marque de l'éditeur iD " +
+        "(#id-container absent) ; rien à faire ici, l'éditeur vit dans l'autre cadre.",
+      );
+      return;
+    }
     console.warn(
       `[cadastre-id] désactivé : le contexte iD n'a jamais été capturé (${CAPTURE_TIMEOUT_MS / 1000} s ` +
       `écoulées) ; le greffon reste inactif, l'éditeur n'est pas affecté. ${DISABLE_HINT}`,

@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { captureContext, makeBridge, raceCaptureAgainstTimeout, waitForSurface } from '../../src/bridge/capture';
+import {
+  captureContext, makeBridge, raceCaptureAgainstTimeout, waitForSurface, looksLikeIdDocument,
+} from '../../src/bridge/capture';
 
 describe('captureContext', () => {
   beforeEach(() => {
@@ -718,6 +720,79 @@ describe('raceCaptureAgainstTimeout', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// Troisième lancement réel : le chien de garde de capture s'arme dans TOUT document qui
+// matche `@match`, y compris `/edit` — le document parent qui ne fait qu'héberger
+// l'iframe `/id` où vit réellement iD (spike du 2026-09-23). Sans distinction, `/edit`
+// atteignait l'échéance à CHAQUE chargement de l'éditeur et affichait le message de
+// rupture structurelle destiné à un VRAI échec de capture. `looksLikeIdDocument`
+// distingue les deux documents par une marque HTML, pas par l'URL (voir le
+// raisonnement complet dans src/bridge/capture.ts).
+describe('looksLikeIdDocument — distinguer le document qui héberge réellement iD', () => {
+  // Construit un document jsdom isolé (pas le `document` global partagé entre tests) à
+  // partir d'un corps HTML complet, pour éviter qu'un test qui « ressemble » à
+  // l'éditeur ne soit en fait qu'un div isolé sans rien autour — le genre de fixture
+  // qui passerait même si l'implémentation cherchait le mauvais élément.
+  const documentAvec = (bodyHtml: string): Document => {
+    const doc = document.implementation.createHTMLDocument('osm.org');
+    doc.body.innerHTML = bodyHtml;
+    return doc;
+  };
+
+  it('reconnaît le document qui porte la marque de l’éditeur iD, même noyée dans une page complète', () => {
+    // Reproduit la forme rapportée par le spike pour `id.html.erb` (barre d'outils,
+    // panneau latéral, script du bundle) — pas juste le div isolé dont
+    // getElementById aurait trivialement besoin.
+    const doc = documentAvec(`
+      <header class="site-header"><nav>OpenStreetMap</nav></header>
+      <div id="id-container">
+        <div class="main-content active">
+          <div id="content" class="content">
+            <div class="main-map"></div>
+          </div>
+        </div>
+      </div>
+      <script src="/assets/id-71d5cb28.js"></script>
+    `);
+
+    expect(looksLikeIdDocument(doc)).toBe(true);
+  });
+
+  it('ne reconnaît pas une page osm.org ordinaire (changeset, profil...) sans cette marque', () => {
+    // Forme plausible d'une page de changeset : du contenu, une barre de navigation,
+    // mais jamais le conteneur d'iD — c'est le document `/edit` (et toute autre page
+    // du site) de la vraie régression rapportée.
+    const doc = documentAvec(`
+      <header class="site-header"><nav>OpenStreetMap</nav></header>
+      <div id="content">
+        <div class="changeset">
+          <h2>Changeset nº 123456</h2>
+          <div class="changeset-details"></div>
+        </div>
+      </div>
+    `);
+
+    expect(looksLikeIdDocument(doc)).toBe(false);
+  });
+
+  it('ne se laisse pas abuser par un identifiant qui ressemble sans être exact', () => {
+    // Une classe (pas un id) du même nom, et un id voisin mais distinct : si
+    // l'implémentation faisait une recherche de sous-chaîne sur le HTML plutôt qu'un
+    // vrai getElementById('id-container'), ces deux décoys la feraient mordre.
+    const doc = documentAvec(`
+      <div class="id-container">pas le bon attribut</div>
+      <div id="id-container-preview">id voisin, pas exact</div>
+    `);
+
+    expect(looksLikeIdDocument(doc)).toBe(false);
+  });
+
+  it('ne lève jamais, même sur un objet qui n’expose pas getElementById', () => {
+    const pasUnDocument = {} as unknown as Document;
+    expect(() => looksLikeIdDocument(pasUnDocument)).not.toThrow();
+    expect(looksLikeIdDocument(pasUnDocument)).toBe(false);
   });
 });
 

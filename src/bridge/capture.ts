@@ -87,6 +87,45 @@ export function raceCaptureAgainstTimeout(
 }
 
 /**
+ * Vrai si CE document porte la marque HTML qui identifie la page réelle de l'éditeur
+ * iD : un élément `id="id-container"`.
+ *
+ * Pourquoi ce sélecteur précisément : le spike (`docs/superpowers/spikes/2026-09-22-
+ * capture-contexte-id.md`, correction de conception n°1) a lu le gabarit Rails qui sert
+ * l'éditeur — `id.html.erb` — et y a trouvé exactement `<div id="id-container">`. Ce
+ * gabarit sert la page `/id`, celle que le spike a confirmée être chargée dans une
+ * iframe distincte du document `/edit` qui l'héberge (une hypothèse de lecture de code
+ * que la session réelle a corrigée) : `/edit` ne contient qu'un cadre pointant vers
+ * `/id`, jamais cette marque elle-même ; `/id` la contient toujours, que `window.iD` se
+ * soit ensuite capturé ou non.
+ *
+ * Pourquoi une marque DOM plutôt qu'un test sur `location.pathname` : cette fonction ne
+ * tourne qu'APRÈS l'expiration du chien de garde de capture (CAPTURE_TIMEOUT_MS), donc
+ * bien après que le HTML initial du document a fini d'être analysé. Cette marque est
+ * produite par le gabarit Rails côté SERVEUR, donc déjà présente dans ce HTML initial —
+ * bien avant que le (gros) bundle JS d'iD n'ait eu la moindre chance de s'exécuter. Sa
+ * présence ne dépend donc PAS de la réussite de la capture : un document qui la porte
+ * mais où `window.iD` n'a jamais été affecté est un cas structurel réel (bundle cassé,
+ * iD a renommé son namespace...), exactement celui que le message de désactivation
+ * existant doit continuer à signaler. Un test fondé sur l'URL resterait correct tant que
+ * `@match` (src/meta.ts) et la structure de page d'osm.org restent synchronisés, mais
+ * romprait silencieusement dès que l'un des deux change sans l'autre ; celui-ci reste
+ * vrai même si osm.org sert un jour l'éditeur ailleurs qu'à `/id` — le cas que le spike
+ * signale explicitement comme possible.
+ *
+ * Ne lève jamais : un document qui ne supporte pas `getElementById` (forme inattendue,
+ * document déjà démoli...) est traité comme « pas l'éditeur », pas comme une exception
+ * qui remonterait dans le chemin de désactivation qu'elle est censée arbitrer.
+ */
+export function looksLikeIdDocument(doc: Document): boolean {
+  try {
+    return !!doc.getElementById('id-container');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Attend que `svg.surface` apparaisse quelque part sous `container`, borné par
  * `timeoutMs`. Résout `true` dès que trouvé, `false` si le délai s'écoule d'abord — ne
  * rejette et ne lève JAMAIS, pour la même raison que `raceCaptureAgainstTimeout` : une
