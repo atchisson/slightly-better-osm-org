@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isDegenerate, dropCollinear, simplify } from '../../src/geometry/clean';
+import { isDegenerate, dropCollinear, simplify, SIMPLIFY_TOLERANCE_M } from '../../src/geometry/clean';
 import type { LonLat, Ring } from '../../src/geometry/types';
 
 const ferme = (pts: Ring): Ring => [...pts, pts[0]!];
@@ -177,5 +177,35 @@ describe('sommets inamovibles (keepVertex)', () => {
     const avec = dropCollinear(avecSommetColineaire, 0.02, p => p[0] === 0.0005 && p[1] === 47.5);
     // le contour protégé contient tout ce que le contour non protégé contenait
     for (const p of sans) expect(avec.map(cle)).toContain(cle(p));
+  });
+});
+
+describe('SIMPLIFY_TOLERANCE_M — la tolérance par défaut est une décision mesurée', () => {
+  it('borne l’écart à 5 cm, et pas davantage', () => {
+    expect(SIMPLIFY_TOLERANCE_M).toBe(0.05);
+  });
+
+  it('garde un sommet qui s’écarte de plus que la tolérance', () => {
+    // Un décroché de 10 cm : le genre de détail que la tolérance précédente de
+    // 20 cm effaçait, et qui se voyait à l'écran sur un bâtiment léger.
+    const m = 1 / 111320;                       // ~1 m en degrés de latitude
+    const ring: Ring = [
+      [0, 47.5], [0.0001, 47.5], [0.0001, 47.5 + 10 * m],
+      [0.00005, 47.5 + 10 * m + 0.1 * m],       // décroché de 10 cm
+      [0, 47.5 + 10 * m], [0, 47.5],
+    ];
+
+    expect(simplify(ring)).toHaveLength(ring.length);
+  });
+
+  it('efface un décroché nettement sous la tolérance', () => {
+    const m = 1 / 111320;
+    const ring: Ring = [
+      [0, 47.5], [0.0001, 47.5], [0.0001, 47.5 + 10 * m],
+      [0.00005, 47.5 + 10 * m + 0.01 * m],      // décroché de 1 cm
+      [0, 47.5 + 10 * m], [0, 47.5],
+    ];
+
+    expect(simplify(ring).length).toBeLessThan(ring.length);
   });
 });

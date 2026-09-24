@@ -112,17 +112,40 @@ export function dropCollinear(
 }
 
 /**
- * Réduit la précision excessive du cadastre par un Douglas-Peucker classique,
- * à une tolérance bien en deçà de la précision cadastrale (20 cm par défaut).
+ * Tolérance de simplification : 5 cm.
+ *
+ * **Mesurée, pas choisie.** La valeur précédente — 20 cm, « bien en deçà de la
+ * précision cadastrale » — a été signalée à l'écran sur un bâtiment léger : le
+ * contour rendu ne suivait pas la géométrie. Mesure sur deux communes entières,
+ * en comparant chaque arête rendue au bord des polygones d'entrée :
+ *
+ * | tolérance | sommets (Angers) | écart p95 | écart max |
+ * |-----------|------------------|-----------|-----------|
+ * | 0,20 m    | 364 788          | 6,8 cm    | 19,9 cm   |
+ * | 0,05 m    | 374 374          | 1,5 cm    | 5,0 cm    |
+ * | 0,02 m    | 379 961          | 0,8 cm    | 2,0 cm    |
+ *
+ * Le marché était mauvais : 2,6 % de nœuds économisés contre 20 cm d'écart sur
+ * chaque contour. Sur un import cadastral, les sommets sources SONT les coins du
+ * bâtiment — il n'y a quasiment rien à simplifier (7,2 sommets par contour à
+ * 20 cm, 7,5 sans aucune simplification). Le gain n'existait pas ; la perte, si.
+ *
+ * 5 cm plutôt que 2 cm : à 2 cm, Douglas-Peucker ne retire plus rien que
+ * `dropCollinear` n'ait déjà retiré (mêmes chiffres exactement), la passe
+ * deviendrait un poids mort. À 5 cm elle retire encore du détail réellement
+ * négligeable, sous le pixel à tout zoom d'édition, en gardant la garantie
+ * d'erreur bornée qu'exige le §5 de la spec.
  *
  * Distincte de dropCollinear, délibérément : simplify est une passe de
  * simplification à part entière (perte de précision assumée), pas un
  * nettoyage de couture ; ne pas les fusionner en une seule fonction sous
  * prétexte qu'elles appellent maintenant la même récursion.
  */
+export const SIMPLIFY_TOLERANCE_M = 0.05;
+
 export function simplify(
   ring: Ring,
-  toleranceM = 0.2,
+  toleranceM = SIMPLIFY_TOLERANCE_M,
   keepVertex?: (p: LonLat) => boolean,
 ): Ring {
   return douglasPeuckerRing(ring, toleranceM, keepVertex);

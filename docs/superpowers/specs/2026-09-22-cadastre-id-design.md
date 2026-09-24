@@ -211,6 +211,29 @@ Ce choix a été fait en connaissance du risque : 16 % des constructions légèr
 5. Si l'union produit un trou ou plusieurs parties : refus, avec message.
 6. Supprimer les sommets colinéaires apparus aux coutures, puis simplifier (Douglas-Peucker, coefficient réglable, défaut à caler pendant l'implémentation). **Les deux passes doivent borner leur erreur** : tout sommet supprimé reste à moins de la tolérance du contour retenu. C'est une garantie que seul un algorithme global comme Douglas-Peucker apporte ; un test de proximité local, appliqué en cascade, laisse l'erreur se composer. Mesuré le 2026-09-23 : une première implémentation locale déplaçait des contours réels jusqu'à 7,27 m avec une tolérance de 2 cm. **Un sommet partagé avec un polygone cadastre non membre de l'union est inamovible** : les deux passes le conservent, quelle que soit sa colinéarité.
 
+   > **Tolérance calée le 2026-09-24, sur signalement à l'écran.** Le défaut « la
+   > géométrie n'est pas très bien respectée » a été constaté sur un bâtiment léger
+   > en session réelle. Mesure de contrôle sur deux communes entières (28404 :
+   > 6 271 polygones ; 49007 Angers : 50 740), en comparant chaque arête du contour
+   > rendu au bord des polygones d'entrée :
+   >
+   > | tolérance | sommets (Angers) | écart p95 | écart max |
+   > |-----------|------------------|-----------|-----------|
+   > | 0,20 m    | 364 788          | 6,8 cm    | 19,9 cm   |
+   > | 0,05 m    | 374 374          | 1,5 cm    | 5,0 cm    |
+   > | 0,02 m    | 379 961          | 0,8 cm    | 2,0 cm    |
+   >
+   > L'union elle-même est hors de cause : aucune des 961 compositions de 28404 ne
+   > s'écarte au-delà de la tolérance de simplification, y compris les 33 qui portent
+   > une T-jonction. C'est bien la simplification qui déplaçait le contour.
+   >
+   > Le marché était mauvais : **2,6 % de nœuds économisés contre 20 cm d'écart sur
+   > chaque contour**. Sur un import cadastral, les sommets sources SONT les coins du
+   > bâtiment — 7,24 sommets par contour à 20 cm, 7,54 sans aucune simplification. Le
+   > gain n'existait pas ; la perte, si. Défaut ramené à **5 cm**, et non à 2 cm : à
+   > 2 cm Douglas-Peucker ne retire plus rien que `dropCollinear` n'ait déjà retiré
+   > (chiffres identiques), la passe deviendrait un poids mort.
+   >
    > **Corrigé le 2026-09-23, à la revue de branche.** Cette étape, telle qu'elle était
    > écrite, nettoyait sans regarder le voisinage — et c'est de là que venait le défaut,
    > pas de l'implémentation. Le PCI est topologiquement propre : deux bâtiments mitoyens
