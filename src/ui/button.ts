@@ -6,9 +6,55 @@ const GAP_PX = 10;
 /** Nombre maximal de descentes avant d'abandonner et de le dire. */
 const MAX_DESCENTES = 5;
 
-/** Classes d'un élément, en tolérant le `SVGAnimatedString` des éléments SVG. */
-const classesDe = (el: Element): string =>
-  typeof el.className === 'string' ? el.className : '';
+/** Identifiant de la feuille de style du greffon, injectée une seule fois. */
+const STYLE_ID = 'cadastre-id-styles';
+
+/**
+ * Les règles du bouton, injectées une fois dans le document d'iD.
+ *
+ * Une feuille plutôt que des styles en ligne, pour deux raisons. `:hover` n'existe
+ * pas en style en ligne. Et surtout, la première version habillait le bouton en lui
+ * copiant la classe `bar-button` d'iD : ce sont alors les règles d'iD qui le
+ * peignaient, et elles en faisaient une pastille blanche au milieu d'une barre
+ * sombre — une infobulle, pas un outil. On ne copie donc plus aucune classe d'iD ;
+ * on mesure la couleur du voisin (voir `grefferDansLaBarre`) et on s'habille.
+ *
+ * `currentColor` fait tout le travail : la couleur du texte est posée en ligne
+ * depuis le bouton voisin d'iD, et la bordure comme le survol s'en déduisent. Le
+ * bouton s'accorde donc au thème de la barre sans que ce thème soit écrit ici.
+ */
+const STYLES = `
+.cadastre-id-toggle {
+  display: inline-flex; align-items: center;
+  height: 30px; margin: 0 4px; padding: 0 10px;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-radius: 4px;
+  font: inherit; font-size: 12px; line-height: 1; white-space: nowrap;
+  cursor: pointer;
+}
+.cadastre-id-toggle:hover {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+.cadastre-id-toggle.cadastre-id-armed {
+  background: #7092ff; border-color: #7092ff; color: #fff;
+}
+.cadastre-id-toggle.cadastre-id-flottant {
+  position: absolute; z-index: 100; height: auto; margin: 0; padding: 6px 10px;
+  background: #fff; color: #333; border-color: #ccc;
+}
+.cadastre-id-toggle.cadastre-id-flottant.cadastre-id-armed {
+  background: #7092ff; color: #fff; border-color: #7092ff;
+}
+`;
+
+function injecterStyles(doc: Document): void {
+  if (doc.getElementById(STYLE_ID)) return;
+  const style = doc.createElement('style');
+  style.id = STYLE_ID;
+  style.textContent = STYLES;
+  (doc.head ?? doc.documentElement).appendChild(style);
+}
 
 /**
  * Ce qu'une variante de placement doit savoir faire : montrer l'état armé, et se
@@ -77,10 +123,7 @@ function poserSurLaCarte(bridge: IdBridge, button: HTMLButtonElement): Placement
   const container = bridge.containerNode();
   const surface = bridge.surfaceNode();
 
-  button.style.cssText =
-    'position:absolute;z-index:100;padding:6px 10px;' +
-    'background:#fff;color:#333;border:1px solid #ccc;border-radius:4px;' +
-    'cursor:pointer;font:inherit;line-height:normal';
+  button.classList.add('cadastre-id-flottant');
 
   const place = (): void => {
     const c = container.getBoundingClientRect();
@@ -124,10 +167,7 @@ function poserSurLaCarte(bridge: IdBridge, button: HTMLButtonElement): Placement
   window.addEventListener('resize', place);
 
   return {
-    setActive: (on) => {
-      button.style.background = on ? '#2e7dd7' : '#fff';
-      button.style.color = on ? '#fff' : '#333';
-    },
+    setActive: (on) => armer(button, on),
     destroy: () => {
       window.removeEventListener('resize', place);
       observer?.disconnect();
@@ -149,28 +189,37 @@ function poserSurLaCarte(bridge: IdBridge, button: HTMLButtonElement): Placement
  * il suivra ses évolutions.
  */
 function grefferDansLaBarre(slot: ToolbarSlot, button: HTMLButtonElement): Placement {
-  button.className = `${classesDe(slot.bouton)} cadastre-id-toggle`.trim();
+  // On MESURE la couleur d'un bouton voisin d'iD au lieu de lui copier sa classe.
+  // Copier la classe laissait les règles d'iD peindre le bouton, et elles en
+  // faisaient une pastille blanche dans une barre sombre. Lire la couleur calculée
+  // donne l'accord au thème sans en hériter les règles — et suit iD s'il change de
+  // thème, ce qu'une couleur écrite ici ne ferait pas.
+  const couleur = getComputedStyle(slot.bouton).color;
+  if (couleur) button.style.color = couleur;
 
   // Si le bouton modèle EST l'enfant direct de la barre, il n'y a pas de coquille à
-  // cloner : on se pose à côté de lui.
-  const coquille = slot.item === slot.bouton ? null : document.createElement(slot.item.tagName);
+  // cloner : on se pose à côté de lui. La coquille, elle, porte la mise en page de la
+  // barre (flex, groupes) : c'est la seule chose qu'on reprend d'iD.
+  const coquille = slot.item === slot.bouton
+    ? null
+    : (slot.item.cloneNode(false) as HTMLElement);
   if (coquille) {
-    coquille.className = classesDe(slot.item);
+    // `cloneNode(false)` reprend les attributs : un `id` dupliqué en ferait partie.
+    coquille.removeAttribute('id');
     coquille.appendChild(button);
   }
   slot.item.after(coquille ?? button);
 
   return {
-    setActive: (on) => {
-      // `active` est la convention d'iD pour un outil armé ; la couleur explicite
-      // garantit que l'état se voit même si cette classe n'est pas stylée.
-      button.classList.toggle('active', on);
-      button.setAttribute('aria-pressed', String(on));
-      button.style.background = on ? '#2e7dd7' : '';
-      button.style.color = on ? '#fff' : '';
-    },
+    setActive: (on) => armer(button, on),
     destroy: () => (coquille ?? button).remove(),
   };
+}
+
+/** Bascule l'apparence armée, et l'annonce aux technologies d'assistance. */
+function armer(button: HTMLButtonElement, on: boolean): void {
+  button.classList.toggle('cadastre-id-armed', on);
+  button.setAttribute('aria-pressed', String(on));
 }
 
 /**
@@ -197,6 +246,8 @@ export function createButton(
   bridge: IdBridge,
   onToggle: (on: boolean) => void,
 ): { element: HTMLButtonElement; setOn: (on: boolean) => void; destroy: () => void } {
+  injecterStyles(document);
+
   const button = document.createElement('button');
   button.className = 'cadastre-id-toggle';
   button.type = 'button';

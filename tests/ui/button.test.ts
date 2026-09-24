@@ -56,6 +56,7 @@ const creer = (onToggle: (on: boolean) => void = () => {}): HTMLButtonElement =>
 
 beforeEach(() => {
   document.body.innerHTML = '';
+  document.getElementById('cadastre-id-styles')?.remove();
   slot = null;
   container = document.createElement('div');
   surface = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -79,7 +80,7 @@ afterEach(() => {
 });
 
 /** Une barre d'outils d'iD : un enfant direct, portant un bouton. */
-const barreDOutils = (): { barre: HTMLElement; item: HTMLElement } => {
+const barreDOutils = (): { barre: HTMLElement; item: HTMLElement; bouton: HTMLElement } => {
   const barre = document.createElement('div');
   barre.className = 'top-toolbar';
   const item = document.createElement('div');
@@ -90,7 +91,7 @@ const barreDOutils = (): { barre: HTMLElement; item: HTMLElement } => {
   barre.appendChild(item);
   container.appendChild(barre);
   slot = { item, bouton };
-  return { barre, item };
+  return { barre, item, bouton };
 };
 
 /** Un iD dont la barre d'outils recouvre tout point au-dessus de `BAS_BANDEAU`. */
@@ -118,28 +119,49 @@ describe('createButton — dans la barre d\'outils d\'iD', () => {
     expect(coquille.contains(button)).toBe(true);
   });
 
-  it("copie les classes d'un bouton d'iD pour prendre son apparence", () => {
-    barreDOutils();
+  it("prend la couleur d'un bouton voisin d'iD, sans hériter de ses règles", () => {
+    const { bouton } = barreDOutils();
+    bouton.style.color = 'rgb(200, 210, 220)';
 
     const button = creer();
 
-    // `bar-button` vient d'iD, `cadastre-id-toggle` est notre marque : la première
-    // donne le thème sans qu'aucune règle CSS d'iD ne soit recopiée dans le projet,
-    // la seconde reste le sélecteur de diagnostic documenté.
-    expect(button.className.split(/\s+/)).toEqual(['bar-button', 'cadastre-id-toggle']);
+    // Mesurer la couleur du voisin plutôt que copier sa classe : la première version
+    // copiait `bar-button`, et les règles d'iD en faisaient une pastille blanche au
+    // milieu d'une barre sombre — une infobulle, pas un outil.
+    expect(button.style.color).toBe('rgb(200, 210, 220)');
+    expect(button.className).toBe('cadastre-id-toggle');
   });
 
-  it("signale l'état armé par la convention d'iD et par ARIA", () => {
+  it("n'emporte pas l'id du voisin en clonant sa coquille", () => {
+    const { item } = barreDOutils();
+    item.id = 'un-id-d-iD';
+
+    const button = creer();
+
+    // `cloneNode(false)` reprend les attributs : un id dupliqué casserait le
+    // `getElementById` d'iD sur son propre élément.
+    expect(button.parentElement?.id).toBe('');
+  });
+
+  it("signale l'état armé visuellement et par ARIA", () => {
     barreDOutils();
     const button = creer();
 
-    expect(button.classList.contains('active')).toBe(false);
+    expect(button.classList.contains('cadastre-id-armed')).toBe(false);
     expect(button.getAttribute('aria-pressed')).toBe('false');
 
     button.click();
 
-    expect(button.classList.contains('active')).toBe(true);
+    expect(button.classList.contains('cadastre-id-armed')).toBe(true);
     expect(button.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it("n'injecte sa feuille de style qu'une fois", () => {
+    barreDOutils();
+    creer();
+    creer();
+
+    expect(document.querySelectorAll('#cadastre-id-styles')).toHaveLength(1);
   });
 
   it('retire sa coquille au démontage', () => {
@@ -196,7 +218,9 @@ describe('createButton — repli flottant sur la carte', () => {
     const button = creer();
 
     expect(button.parentElement).toBe(container);
-    expect(button.style.position).toBe('absolute');
+    // Le positionnement absolu vient de la feuille de style (classe flottante) ;
+    // seules les coordonnées restent écrites en ligne, puisqu'elles se mesurent.
+    expect(button.classList.contains('cadastre-id-flottant')).toBe(true);
   });
 
   it('se replace quand la surface bouge (repli du panneau, redimensionnement)', () => {
@@ -219,11 +243,11 @@ describe('createButton — setOn, pour le raccourci Ctrl', () => {
 
     setOn(true);
     expect(etats).toEqual([true]);
-    expect(element.classList.contains('active')).toBe(true);
+    expect(element.classList.contains('cadastre-id-armed')).toBe(true);
 
     setOn(false);
     expect(etats).toEqual([true, false]);
-    expect(element.classList.contains('active')).toBe(false);
+    expect(element.classList.contains('cadastre-id-armed')).toBe(false);
   });
 
   it('est idempotent', () => {
