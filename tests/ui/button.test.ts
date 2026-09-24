@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createButton } from '../../src/ui/button';
+import type { IdBridge, ToolbarSlot } from '../../src/bridge/types';
 
 const faireRect = (left: number, top: number, width: number, height: number): DOMRect =>
   ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top,
@@ -11,33 +12,50 @@ const poser = (el: Element, left: number, top: number, width: number, height: nu
 };
 
 /**
- * Géométrie relevée dans un vrai iD (sonde en navigateur, cadre `/id`) :
- * la surface de carte commence à `top=0` — la barre d'outils est posée
- * PAR-DESSUS elle, pas au-dessus — et ce bandeau descend jusqu'à 71 px.
- * Reproduire ces chiffres est tout l'intérêt de ces tests : c'est cette
- * superposition, et elle seule, qui a fait échouer les deux placements précédents.
+ * Géométrie relevée dans un vrai iD (sonde en navigateur, cadre `/id`) : la surface
+ * de carte commence à `top=0` — la barre d'outils est posée PAR-DESSUS elle, pas
+ * au-dessus — et ce bandeau descend jusqu'à 71 px. Reproduire ces chiffres est tout
+ * l'intérêt de ces tests : c'est cette superposition, et elle seule, qui a fait
+ * échouer deux placements successifs.
  */
 const SURFACE = { left: 400, top: 0, width: 1520, height: 606 };
 const BAS_BANDEAU = 71;
 
 let container: HTMLElement;
 let surface: Element;
+let slot: ToolbarSlot | null;
 const rectOrigine = HTMLButtonElement.prototype.getBoundingClientRect;
 const vivants: Array<() => void> = [];
 
+const fauxBridge = (): IdBridge => ({
+  mapExtent: () => [[0, 0], [1, 1]],
+  project: (p) => [p[0] * 100, p[1] * 100],
+  invert: (p) => [p[0] / 100, p[1] / 100],
+  onMapMove: () => () => {},
+  buildingsNear: () => [],
+  nodesIn: () => [],
+  createBuilding: () => {},
+  prefillChangeset: () => {},
+  containerNode: () => container,
+  whenSurfaceReady: () => Promise.resolve(true),
+  surfaceNode: () => surface,
+  toolbarSlot: () => slot,
+});
+
 /**
- * Crée un bouton et retient son `destroy`. Sans cela, les boutons d'un test
- * restent abonnés à `resize` et se replacent pendant les tests suivants — une
- * fuite qui noyait la sortie sous des avertissements étrangers au test en cours.
+ * Crée un bouton et retient son `destroy`. Sans cela, les boutons d'un test restent
+ * abonnés à `resize` et se replacent pendant les tests suivants — une fuite qui
+ * noyait la sortie sous des avertissements étrangers au test en cours.
  */
 const creer = (onToggle: (on: boolean) => void = () => {}): HTMLButtonElement => {
-  const { element, destroy } = createButton(container, surface, onToggle);
+  const { element, destroy } = createButton(fauxBridge(), onToggle);
   vivants.push(destroy);
   return element;
 };
 
 beforeEach(() => {
   document.body.innerHTML = '';
+  slot = null;
   container = document.createElement('div');
   surface = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   container.appendChild(surface);
@@ -59,6 +77,21 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** Une barre d'outils d'iD : un enfant direct, portant un bouton. */
+const barreDOutils = (): { barre: HTMLElement; item: HTMLElement } => {
+  const barre = document.createElement('div');
+  barre.className = 'top-toolbar';
+  const item = document.createElement('div');
+  item.className = 'toolbar-item bar-item';
+  const bouton = document.createElement('button');
+  bouton.className = 'bar-button';
+  item.appendChild(bouton);
+  barre.appendChild(item);
+  container.appendChild(barre);
+  slot = { item, bouton };
+  return { barre, item };
+};
+
 /** Un iD dont la barre d'outils recouvre tout point au-dessus de `BAS_BANDEAU`. */
 const simulerBandeau = (): void => {
   const bandeau = document.createElement('div');
@@ -69,7 +102,57 @@ const simulerBandeau = (): void => {
     y < BAS_BANDEAU ? bandeau : document.querySelector('.cadastre-id-toggle');
 };
 
-describe('createButton', () => {
+describe('createButton — dans la barre d\'outils d\'iD', () => {
+  it("se greffe juste après l'élément modèle, dans une coquille clonée", () => {
+    const { barre, item } = barreDOutils();
+
+    const button = creer();
+
+    const coquille = item.nextElementSibling as HTMLElement;
+    expect(coquille.parentElement).toBe(barre);
+    expect(coquille.tagName).toBe(item.tagName);
+    // La coquille porte les mêmes classes que celle d'iD : c'est elle qui décide de
+    // la mise en page (flex, groupes), et la copier évite de la reproduire ici.
+    expect(coquille.className).toBe('toolbar-item bar-item');
+    expect(coquille.contains(button)).toBe(true);
+  });
+
+  it("copie les classes d'un bouton d'iD pour prendre son apparence", () => {
+    barreDOutils();
+
+    const button = creer();
+
+    // `bar-button` vient d'iD, `cadastre-id-toggle` est notre marque : la première
+    // donne le thème sans qu'aucune règle CSS d'iD ne soit recopiée dans le projet,
+    // la seconde reste le sélecteur de diagnostic documenté.
+    expect(button.className.split(/\s+/)).toEqual(['bar-button', 'cadastre-id-toggle']);
+  });
+
+  it("signale l'état armé par la convention d'iD et par ARIA", () => {
+    barreDOutils();
+    const button = creer();
+
+    expect(button.classList.contains('active')).toBe(false);
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+
+    button.click();
+
+    expect(button.classList.contains('active')).toBe(true);
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('retire sa coquille au démontage', () => {
+    const { barre, item } = barreDOutils();
+    const { destroy } = createButton(fauxBridge(), () => {});
+
+    destroy();
+
+    expect(item.nextElementSibling).toBeNull();
+    expect(barre.querySelector('.cadastre-id-toggle')).toBeNull();
+  });
+});
+
+describe('createButton — repli flottant sur la carte', () => {
   it("descend sous la barre d'outils d'iD au lieu de rester dessous", () => {
     simulerBandeau();
 
@@ -90,12 +173,12 @@ describe('createButton', () => {
     expect(button.style.left).toBe('410px');
   });
 
-  it("ne part pas hors écran si tout le recouvre, et le signale", () => {
+  it('ne part pas hors écran si tout le recouvre, et le signale', () => {
     const avertir = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const gêneur = document.createElement('div');
     document.body.appendChild(gêneur);
-    // Un gêneur qui descend toujours plus bas que le bouton : sans garde-fou,
-    // la descente serait infinie et le bouton finirait sous la carte.
+    // Un gêneur qui descend toujours plus bas que le bouton : sans garde-fou, la
+    // descente serait infinie et le bouton finirait sous la carte.
     document.elementFromPoint = (_x: number, y: number) => {
       poser(gêneur, 0, 0, 1920, y + 1000);
       return gêneur;
@@ -107,9 +190,10 @@ describe('createButton', () => {
     expect(avertir).toHaveBeenCalledOnce();
   });
 
-  it('est bien rattaché au conteneur, seul ancêtre positionné connu', () => {
+  it('est rattaché au conteneur, seul ancêtre positionné connu', () => {
     document.elementFromPoint = () => null;
     const button = creer();
+
     expect(button.parentElement).toBe(container);
     expect(button.style.position).toBe('absolute');
   });
@@ -124,9 +208,14 @@ describe('createButton', () => {
     expect(button.style.left).toBe('10px');
     expect(button.style.top).toBe('81px');
   });
+});
 
-  it('bascule à chaque clic et signale son état', () => {
-    document.elementFromPoint = () => null;
+describe('createButton — bascule', () => {
+  it.each([
+    ['dans la barre', () => { barreDOutils(); }],
+    ['en repli flottant', () => { document.elementFromPoint = () => null; }],
+  ])('bascule à chaque clic et signale son état (%s)', (_nom, preparer) => {
+    preparer();
     const etats: boolean[] = [];
     const button = creer(on => etats.push(on));
 

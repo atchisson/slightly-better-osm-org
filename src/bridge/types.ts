@@ -3,6 +3,22 @@ import type { ExistingNode } from '../conflation/snap';
 import type { LonLat, Ring } from '../geometry/types';
 
 /**
+ * Un emplacement où greffer un contrôle dans la barre d'outils d'iD.
+ *
+ * On ne rend pas un sélecteur ni des noms de classes, mais des ÉLÉMENTS À IMITER :
+ * l'appelant clone la coquille de `item` et les classes de `bouton`, et hérite ainsi
+ * de l'apparence d'iD sans qu'aucun nom de classe ne sorte de `src/bridge/` (§4 de
+ * la spec). Si iD renomme ses classes, le greffon retombe sur son placement flottant
+ * au lieu d'afficher un bouton mal habillé.
+ */
+export interface ToolbarSlot {
+  /** Enfant direct de la barre d'outils qui porte `bouton` — la coquille à cloner. */
+  item: Element;
+  /** Un bouton d'iD dont on copie les classes pour prendre son apparence. */
+  bouton: Element;
+}
+
+/**
  * Interface étroite entre le reste du projet et les internes d'iD. C'est le seul endroit
  * qui connaît le contexte iD ; tout le reste du projet ne dépend que de ce fichier.
  */
@@ -67,4 +83,16 @@ export interface IdBridge {
    * fonctionner.
    */
   surfaceNode(): Element;
+  /**
+   * Où greffer le bouton dans la barre d'outils d'iD, ou `null` si elle n'a pas la
+   * forme attendue.
+   *
+   * La barre d'outils est posée PAR-DESSUS la carte : `svg.surface` commence à
+   * `top=0` et passe dessous (relevé en navigateur, voir le spike). Un bouton
+   * simplement posé sur la carte se retrouve donc dans le bandeau, présent et
+   * invisible — c'est arrivé deux fois. Le greffer dans la barre supprime la
+   * question au lieu de la contourner, et le range là où l'utilisateur cherche un
+   * outil.
+   */
+  toolbarSlot(): ToolbarSlot | null;
 }

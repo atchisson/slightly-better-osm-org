@@ -77,7 +77,6 @@ void (async () => {
     return;
   }
 
-  const container = bridge.containerNode();
   const mode = createMode(bridge, { notify: m => window.alert(m) });
 
   // `bridge.surfaceNode()` et rien d'autre : l'élément dont le coin EST l'origine de
@@ -120,6 +119,6 @@ void (async () => {
     void mode.clickAt(toLonLat(e as MouseEvent));
   });
 
-  createButton(container, surface, on => (on ? mode.enable() : mode.disable()));
+  createButton(bridge, on => (on ? mode.enable() : mode.disable()));
   log('prêt');
 })();

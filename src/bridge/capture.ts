@@ -1,4 +1,4 @@
-import type { IdBridge } from './types';
+import type { IdBridge, ToolbarSlot } from './types';
 import type { ExistingBuilding } from '../conflation/overlap';
 import type { ExistingNode } from '../conflation/snap';
 import type { LonLat, Ring } from '../geometry/types';
@@ -606,6 +606,31 @@ function buildBridge(c: any): IdBridge {
         "conversion ecran -> coordonnees peuvent ne plus coincider avec la carte.",
       );
       return container;
+    },
+
+    toolbarSlot(): ToolbarSlot | null {
+      // Deuxième et dernier endroit du projet qui connaît un sélecteur interne d'iD
+      // (§4 de la spec) — et il ne le laisse pas sortir : ce qu'on rend, ce sont des
+      // éléments à imiter, pas des noms de classes.
+      const container = c.container().node() as HTMLElement;
+      const barre = typeof container?.querySelector === 'function'
+        ? container.querySelector('.top-toolbar')
+        : null;
+      const bouton = barre?.querySelector('.bar-button') ?? null;
+      if (!barre || !bouton) {
+        // Repli explicite, jamais muet : le bouton ira flotter sur la carte, où il
+        // devra se défendre seul contre le recouvrement.
+        console.log(
+          "[cadastre-id] barre d'outils d'iD introuvable (.top-toolbar / .bar-button) : " +
+          "le bouton Cadastre sera posé sur la carte au lieu d'être intégré à la barre.",
+        );
+        return null;
+      }
+      // L'enfant direct de la barre qui porte ce bouton : c'est la coquille dont
+      // dépend la mise en page (flex, groupes), donc celle qu'il faut cloner.
+      let item: Element = bouton;
+      while (item.parentElement && item.parentElement !== barre) item = item.parentElement;
+      return { item, bouton };
     },
   };
 }

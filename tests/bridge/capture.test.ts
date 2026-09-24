@@ -555,21 +555,23 @@ describe('nodesIn — éligibilité des nœuds au recalage', () => {
   });
 });
 
+// Contexte iD minimal dont seul le nœud conteneur compte : il sert aux deux lectures
+// de DOM du bridge, `surfaceNode()` et `toolbarSlot()`.
+const ctxAvecConteneur = (node: unknown) => ({
+  map: () => ({ extent: () => ({ rectangle: () => [0, 0, 1, 1] }), on: () => {}, off: () => {} }),
+  history: () => ({ intersects: () => [] }),
+  graph: () => ({ entity: () => ({ loc: [0, 0] }) }),
+  projection: Object.assign((p: unknown) => p, { invert: (p: unknown) => p }),
+  perform: () => {},
+  enter: () => {},
+  container: () => ({ node: () => node }),
+});
+
 describe('surfaceNode — une seule origine de projection', () => {
   // I1 : `src/main.ts` faisait `container.querySelector('svg.surface') ?? container` —
   // un sélecteur interne d'iD HORS de src/bridge/ (contre le §4 de la spec), avec un
   // repli MUET qui changeait l'origine des coordonnées sans le dire. La connaissance
   // vit maintenant ici, et le repli se dit en console.
-  const ctxAvecConteneur = (node: unknown) => ({
-    map: () => ({ extent: () => ({ rectangle: () => [0, 0, 1, 1] }), on: () => {}, off: () => {} }),
-    history: () => ({ intersects: () => [] }),
-    graph: () => ({ entity: () => ({ loc: [0, 0] }) }),
-    projection: Object.assign((p: unknown) => p, { invert: (p: unknown) => p }),
-    perform: () => {},
-    enter: () => {},
-    container: () => ({ node: () => node }),
-  });
-
   it('rend la surface de carte quand elle existe, pas la racine de l’éditeur', () => {
     const conteneur = document.createElement('div');
     const surface = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -880,6 +882,61 @@ describe('waitForSurface — attendre que la carte d’iD ait fini de s’initia
     } finally {
       disconnectEspion.mockRestore();
       vi.useRealTimers();
+    }
+  });
+});
+
+describe('toolbarSlot — greffer dans la barre plutôt que se battre contre elle', () => {
+  // La barre d'outils d'iD est posée PAR-DESSUS la carte (relevé en navigateur :
+  // svg.surface commence à top=0, le bandeau descend jusqu'à 71 px). Un bouton posé
+  // sur la carte s'y retrouve donc enterré, présent et invisible — c'est arrivé deux
+  // fois. Ce que le bridge rend ici, ce ne sont pas des noms de classes mais des
+  // ÉLÉMENTS À IMITER : aucun sélecteur interne d'iD ne sort de src/bridge/ (§4).
+  const barre = (contenu: string): HTMLElement => {
+    const conteneur = document.createElement('div');
+    conteneur.innerHTML = `<div class="top-toolbar">${contenu}</div>`;
+    return conteneur;
+  };
+
+  it("rend l'enfant direct de la barre qui porte le bouton, pas le bouton lui-même", () => {
+    const conteneur = barre('<div class="toolbar-item"><button class="bar-button"></button></div>');
+    const slot = makeBridge(ctxAvecConteneur(conteneur)).toolbarSlot();
+
+    // L'enfant direct porte la mise en page (flex, groupes) : c'est lui qu'il faut
+    // cloner. Rendre le bouton seul produirait un contrôle mal placé dans la barre.
+    expect(slot?.item).toBe(conteneur.querySelector('.toolbar-item'));
+    expect(slot?.bouton).toBe(conteneur.querySelector('.bar-button'));
+  });
+
+  it('remonte jusqu’à l’enfant direct même si le bouton est profondément imbriqué', () => {
+    const conteneur = barre(
+      '<div class="toolbar-item"><div class="wrap"><span><button class="bar-button"></button></span></div></div>',
+    );
+    const slot = makeBridge(ctxAvecConteneur(conteneur)).toolbarSlot();
+
+    expect(slot?.item).toBe(conteneur.querySelector('.toolbar-item'));
+  });
+
+  it('rend le bouton comme son propre item quand il est enfant direct', () => {
+    const conteneur = barre('<button class="bar-button"></button>');
+    const slot = makeBridge(ctxAvecConteneur(conteneur)).toolbarSlot();
+
+    // Pas de coquille à cloner dans ce cas : l'appelant se pose à côté du bouton.
+    expect(slot?.item).toBe(slot?.bouton);
+  });
+
+  it('rend null EN LE DISANT quand la barre n’a pas la forme attendue', () => {
+    const espion = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const conteneur = document.createElement('div');
+      const bridge = makeBridge(ctxAvecConteneur(conteneur));
+
+      expect(bridge.toolbarSlot()).toBeNull();
+      // Le repli est un changement d'apparence visible : il doit se lire en console
+      // plutôt que se deviner à l'écran, comme celui de surfaceNode().
+      expect(espion).toHaveBeenCalledWith(expect.stringContaining("barre d'outils"));
+    } finally {
+      espion.mockRestore();
     }
   });
 });

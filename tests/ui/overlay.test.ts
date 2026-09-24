@@ -18,6 +18,7 @@ const fauxBridge = (container: HTMLElement): IdBridge => ({
   containerNode: () => container,
   whenSurfaceReady: () => Promise.resolve(true),
   surfaceNode: () => container,
+  toolbarSlot: () => null,
 });
 
 // Bridge qui capture réellement le callback d'onMapMove (au lieu du no-op ci-dessus) :
@@ -40,6 +41,7 @@ const fauxBridgeAvecDeplacements = (container: HTMLElement) => {
     containerNode: () => container,
     whenSurfaceReady: () => Promise.resolve(true),
     surfaceNode: () => container,
+    toolbarSlot: () => null,
   };
   return {
     bridge,
@@ -169,6 +171,7 @@ describe('overlay — origine de la projection', () => {
       containerNode: () => conteneur,
       whenSurfaceReady: () => Promise.resolve(true),
       surfaceNode: () => surface,
+      toolbarSlot: () => null,
     };
 
     createOverlay(bridge);
