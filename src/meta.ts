@@ -6,5 +6,6 @@ export const USERSCRIPT_META = `// ==UserScript==
 // @run-at       document-start
 // @grant        none
 // @version      0.1.0
+// @license      ISC
 // ==/UserScript==
 `;

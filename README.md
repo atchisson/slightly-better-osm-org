@@ -321,3 +321,12 @@ sérieusement hors navigateur : voir `docs/verification-manuelle.md`.
 
 Le document de conception complet, avec ses mesures et ses décisions motivées, est
 dans `docs/superpowers/specs/2026-09-22-cadastre-id-design.md`.
+
+## Licence
+
+Le code de ce greffon est publié sous [licence ISC](LICENSE) — © 2026 Antoine Lenoir.
+
+Cette licence ne couvre que le code. Les données manipulées relèvent de leurs propres
+licences : le cadastre reste sous [Licence Ouverte](https://github.com/etalab/licence-ouverte)
+(voir « Attribution des données » plus haut), et les objets écrits dans OpenStreetMap
+sous [ODbL](https://opendatacommons.org/licenses/odbl/).
