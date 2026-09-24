@@ -71,14 +71,16 @@ describe('createCtrlShortcut', () => {
     expect(armements).toEqual([true]);
   });
 
-  it('ne désarme pas un mode que le bouton avait armé', () => {
-    enabled = true; // armé au bouton
+  it('ne désarme pas un mode armé par ailleurs', () => {
+    enabled = true;
 
     ctrl('keydown');
     ctrl('keyup');
 
-    // Sans la mémoire de « qui a armé », relâcher Ctrl éteindrait un mode que
-    // l'utilisatrice avait délibérément activé.
+    // Sans la mémoire de « qui a armé », relâcher Ctrl éteindrait un mode que le
+    // raccourci n'avait pas allumé. Ctrl est aujourd'hui le seul déclencheur, mais
+    // `mode` reste une source d'état extérieure : il se désactive tout seul sur
+    // certains chemins d'échec.
     expect(armements).toEqual([]);
     expect(enabled).toBe(true);
   });

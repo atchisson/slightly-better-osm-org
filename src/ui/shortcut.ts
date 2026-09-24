@@ -2,12 +2,12 @@
  * Ce que le raccourci Ctrl a besoin de savoir et de faire.
  *
  * Il ne parle jamais au mode directement : il passe par `setArmed`, que
- * `src/main.ts` branche sur le bouton. Un seul état d'armement existe donc, et
- * l'utilisatrice voit toujours dans la barre d'outils ce que le greffon croit —
- * sans quoi maintenir Ctrl armerait le mode en laissant le bouton éteint.
+ * `src/main.ts` branche. Cette indirection a d'abord servi à garder bouton et
+ * raccourci sur un seul état d'armement ; le bouton a été retiré, mais elle garde
+ * son intérêt — le raccourci reste testable sans mode, et sans DOM d'éditeur.
  */
 export interface CtrlShortcutHooks {
-  /** Le mode est-il déjà armé par le bouton ? On ne prend alors pas la main. */
+  /** Le mode est-il déjà armé par ailleurs ? On ne prend alors pas la main. */
   isEnabled(): boolean;
   /**
    * Le raccourci a-t-il le droit de s'armer maintenant ?
@@ -17,15 +17,15 @@ export interface CtrlShortcutHooks {
    * (ou interdirait) le raccourci pour toute la session sur un état périmé.
    */
   allowed(): boolean;
-  /** Arme ou désarme, via le bouton. */
+  /** Arme ou désarme le mode. */
   setArmed(on: boolean): void;
 }
 
 /**
  * Maintenir Ctrl arme le mode cadastre ; le relâcher le désarme.
  *
- * Déclencheur transitoire, sans affordance : il double le bouton, il ne le
- * remplace pas. Deux garde-fous en découlent.
+ * C'est l'UNIQUE déclencheur du greffon : il n'y a pas de bouton. Transitoire et
+ * sans affordance, d'où deux garde-fous.
  *
  * **Il ne s'arme que si `allowed()` le permet** — en pratique, que si la couche
  * cadastre est affichée. Un raccourci qu'on ne voit pas doit être difficile à

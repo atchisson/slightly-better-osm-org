@@ -46,40 +46,30 @@ nouvel onglet, sans passer par la carte.
 
 - [ ] `[cadastre-id] prêt` apparaît dans la console (cadre `/id`, voir plus haut)
       **après** que l'éditeur est pleinement chargé. Ce message n'apparaît que si la
-      capture du contexte a réussi ET que le bouton a pu être créé — son absence,
+      capture du contexte a réussi ET que le raccourci a pu être posé — son absence,
       seule, est un signal valide d'échec, pas un faux négatif à ignorer.
-- [ ] Le bouton **Cadastre** est **visible à l'écran**, dans la barre d'outils d'iD,
-      à côté des autres outils et à leur apparence. « Présent dans le DOM » ne suffit
-      pas : le bouton a déjà été livré deux fois recouvert — présent,
-      `visibility:visible`, opacité 1, et pourtant invisible. En cas de doute, dans
-      la console du cadre `/id` :
-
-      ```js
-      const b = document.querySelector('.cadastre-id-toggle');
-      const r = b.getBoundingClientRect();
-      document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) === b;
-      ```
-
-      Doit renvoyer `true`. Tout autre résultat nomme l'élément qui le recouvre.
-- [ ] Si le bouton flotte sur la carte au lieu d'être dans la barre, la console porte
-      `barre d'outils d'iD introuvable` : iD a renommé ses classes et le greffon est
-      sur son repli. Ce n'est pas une panne — le bouton fonctionne — mais
-      `toolbarSlot()` (src/bridge/capture.ts) est à remettre à jour.
+- [ ] **Le greffon n'a aucune interface** : rien n'apparaît à l'écran tant que `Ctrl`
+      n'est pas maintenu. Son seul signe de vie au repos est la ligne
+      `[cadastre-id] prêt — maintenir Ctrl…` en console.
 - [ ] Aucune erreur inattendue en console, en particulier aucune `TypeError` évoquant
       `coreContext` ou l'amorçage d'iD (voir l'avertissement ci-dessus).
-- [ ] **Raccourci Ctrl.** `context.background()` est la seule primitive lue par le
-      projet que le spike n'a pas vérifiée en navigateur : ce point est donc le
-      premier à faire.
-      - Si la console porte `raccourci Ctrl indisponible`, l'API n'a pas la forme
-        attendue. Le greffon fonctionne au bouton ; c'est `cadastreVisible()`
-        (src/bridge/capture.ts) qui est à reprendre, sur le relevé réel.
-      - Sinon : **sans** couche cadastre affichée, maintenir `Ctrl` ne doit rien
-        armer. Avec la couche cadastre affichée (fond ou calque superposé), maintenir
-        `Ctrl` doit allumer le bouton et faire apparaître l'aperçu au survol ; le
-        relâcher doit l'éteindre.
-      - Maintenir `Ctrl`, faire `Alt+Tab`, revenir, relâcher : le bouton doit être
-        éteint. Sans le filet posé sur `blur`, le mode resterait armé et le clic
+- [ ] **Raccourci Ctrl**, seul déclencheur du greffon.
+      - Si la console porte `désactivé : impossible de lire la couche de fond
+        affichée`, le greffon est entièrement inerte : `cadastreVisible()`
+        (src/bridge/capture.ts) est à reprendre sur un relevé réel.
+      - **Sans** couche cadastre affichée, maintenir `Ctrl` ne doit rien armer : aucun
+        contour au survol.
+      - **Avec** la couche cadastre affichée (fond ou calque superposé), maintenir
+        `Ctrl` doit faire apparaître le contour au survol ; le relâcher doit le faire
+        disparaître.
+      - Maintenir `Ctrl`, faire `Alt+Tab`, revenir, relâcher : aucun contour ne doit
+        subsister. Sans le filet posé sur `blur`, le mode resterait armé et le clic
         suivant créerait un bâtiment non demandé.
+      - Armer, survoler, **cliquer** : le bâtiment doit être créé et sélectionné.
+        Aucune `TypeError` ne doit apparaître — ni `class constructors must be invoked
+        with 'new'` (les entités d'iD sont des classes), ni `map().off is not a
+        function` (la carte d'iD est un dispatch d3, sans `off`). Ces deux-là ont été
+        constatées en session réelle.
 
 ## Scénario 2 — entrée dans l'éditeur depuis la carte
 
@@ -99,7 +89,7 @@ aucune ne remplace l'autre :
   d'entrée dans l'éditeur, pas spécifiquement à cause d'une navigation interne.
 
 - [ ] Le script s'injecte tout de même : mêmes vérifications que le scénario 1
-      (`[cadastre-id] prêt`, bouton présent, pas d'erreur), effectuées après être
+      (`[cadastre-id] prêt — maintenir Ctrl…`, pas d'erreur), effectuées après être
       entré dans l'éditeur par ce chemin.
 - [ ] Le comportement est identique à celui obtenu par chargement direct — aucune
       primitive manquante, aucun message d'auto-test qui apparaîtrait dans un
@@ -107,13 +97,12 @@ aucune ne remplace l'autre :
 
 ## Fonctionnement du mode cadastre
 
-À vérifier une fois le bouton confirmé présent dans l'un des deux scénarios
+À vérifier une fois le raccourci confirmé actif dans l'un des deux scénarios
 ci-dessus, sur une commune dont la couverture cadastrale est connue (une commune
 métropolitaine ordinaire suffit ; Paris, Lyon et Marseille méritent un passage
 supplémentaire, voir plus bas).
 
-- [ ] Activer le mode cadastre (clic sur le bouton) ne provoque aucune erreur ; le
-      bouton change d'état visuellement.
+- [ ] Armer le mode (maintenir `Ctrl`) ne provoque aucune erreur en console.
 - [ ] Le survol d'un bâtiment affiche son contour, aligné sur la couche cadastre WMS
       affichée par iD (le calque et le fond de carte doivent se superposer
       visuellement, pas seulement être dans la bonne zone approximative).
@@ -156,10 +145,11 @@ supplémentaire, voir plus bas).
       manuellement au préalable) déclenche un refus : pas de création, et un message
       explicite apparaît (boîte de dialogue du navigateur).
 - [ ] Si un échec de capture du contexte iD se produit réellement pendant l'un des
-      deux scénarios ci-dessus (bouton absent malgré un scénario par ailleurs normal,
-      ou message `[cadastre-id] désactivé : ...` en console) — ne pas le traiter comme
-      un test raté à recommencer, mais comme le signal qu'il faut suivre : le bouton
-      doit être absent (jamais présent mais inopérant), et le message en console doit
+      deux scénarios ci-dessus (`Ctrl` n'arme rien malgré un scénario par ailleurs
+      normal, ou message `[cadastre-id] désactivé : ...` en console) — ne pas le
+      traiter comme un test raté à recommencer, mais comme le signal qu'il faut
+      suivre : le raccourci doit être inerte (jamais armé mais inopérant), et le
+      message en console doit
       nommer la primitive ou l'étape en cause, pas juste dire « erreur ». C'est
       exactement le comportement attendu en cas de rupture de compatibilité avec une
       nouvelle version d'iD — voir « Fiabilité de l'intégration à iD » dans le

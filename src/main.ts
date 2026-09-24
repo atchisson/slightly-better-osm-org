@@ -3,7 +3,6 @@ import {
   SURFACE_READY_TIMEOUT_MS, DISABLE_HINT, looksLikeIdDocument,
 } from './bridge/capture';
 import { createMode } from './mode';
-import { createButton } from './ui/button';
 import { createCtrlShortcut } from './ui/shortcut';
 import type { LonLat } from './geometry/types';
 
@@ -120,33 +119,38 @@ void (async () => {
     void mode.clickAt(toLonLat(e as MouseEvent));
   });
 
-  const bouton = createButton(bridge, on => (on ? mode.enable() : mode.disable()));
-
-  // Maintenir Ctrl arme le mode sans passer par le bouton — mais seulement quand la
-  // couche cadastre est affichée. Ce n'est pas une condition d'exactitude : la
-  // géométrie vient de l'API GeoJSON du cadastre, pas de la couche. C'est la garantie
-  // que l'utilisatrice REGARDE la source qu'elle trace, et c'est ce qu'on exige d'un
-  // déclencheur qui n'a aucune affordance visible.
+  // Le raccourci Ctrl est le SEUL déclencheur du greffon : il n'y a pas de bouton.
+  // Maintenir Ctrl arme le mode le temps de l'appui, et seulement quand une couche
+  // cadastre est affichée dans iD.
   //
-  // `context.background()` est la seule primitive lue par le projet que le spike n'a
-  // PAS vérifiée en navigateur. `cadastreVisible()` rend donc `null` — « je ne sais
-  // pas » — plutôt que de deviner, et `null` ne vaut jamais « oui » : on préfère un
-  // raccourci absent et annoncé à un raccourci qui s'arme n'importe où en silence.
-  // Le bouton, lui, est un acte explicite précédé d'un aperçu : il n'est pas
-  // conditionné.
+  // Cette condition n'a rien à voir avec l'exactitude du tracé : la géométrie vient de
+  // l'API GeoJSON du cadastre, jamais de la couche affichée, et le greffon produirait
+  // le même bâtiment sur un fond satellite. Ce qu'elle garantit, c'est que
+  // l'utilisatrice REGARDE la source qu'elle trace — ce qu'on exige d'un déclencheur
+  // sans affordance visible.
+  //
+  // `cadastreVisible()` rend `null` quand `context.background()` n'a pas la forme
+  // attendue. Tant qu'un bouton existait, ce cas se contentait de retirer le
+  // raccourci ; maintenant qu'il est l'unique porte d'entrée, l'impossibilité de lire
+  // la couche désactive le greffon entier — et le dit, plutôt que de laisser une
+  // interface muette qui a l'air de fonctionner.
   if (bridge.cadastreVisible() === null) {
-    log(
-      "raccourci Ctrl indisponible : impossible de lire la couche affichée " +
-      "(context.background() absent ou de forme inattendue). Le bouton de la barre " +
-      "d'outils reste le seul déclencheur.",
+    console.warn(
+      "[cadastre-id] désactivé : impossible de lire la couche de fond affichée " +
+      "(context.background() absent ou de forme inattendue). Le raccourci Ctrl est le " +
+      `seul déclencheur du greffon et ne peut pas s'armer sans elle. ${DISABLE_HINT}`,
     );
-  } else {
-    createCtrlShortcut({
-      isEnabled: () => mode.isEnabled(),
-      // Relu à chaque appui : la couche s'allume et s'éteint en cours de session.
-      allowed: () => bridge.cadastreVisible() === true,
-      setArmed: on => bouton.setOn(on),
-    });
+    return;
   }
-  log('prêt');
+
+  createCtrlShortcut({
+    isEnabled: () => mode.isEnabled(),
+    // Relu à chaque appui : la couche s'allume et s'éteint en cours de session.
+    allowed: () => bridge.cadastreVisible() === true,
+    setArmed: on => (on ? mode.enable() : mode.disable()),
+  });
+
+  // Sans bouton, cette ligne est la seule chose qui dise comment déclencher le
+  // greffon. Elle nomme donc le geste, pas seulement son état.
+  log('prêt — maintenir Ctrl sur la carte (couche cadastre affichée) pour armer');
 })();

@@ -54,19 +54,16 @@ d'autre que lire et manipuler la page d'édition elle-même.
 
 ## Utilisation
 
-- Sur une page d'édition d'osm.org, un bouton **Cadastre** apparaît dans la barre
-  d'outils d'iD, à côté des outils de dessin. (Si iD renomme ses classes CSS, le
-  bouton se rabat sur la carte elle-même et le dit en console.)
-- L'activer fait apparaître, au survol, le contour du bâtiment cadastral sous le
-  curseur, aligné sur la couche cadastre.
-- **Raccourci :** maintenir `Ctrl` arme le mode le temps de l'appui, sans toucher au
-  bouton — mais seulement quand une couche cadastre est affichée dans iD. Cette
-  condition n'a rien à voir avec l'exactitude du tracé : la géométrie vient toujours
-  de l'API GeoJSON du cadastre, jamais de la couche affichée. Elle garantit que vous
-  **regardez** la source que vous tracez, ce qu'on exige d'un déclencheur qui n'a
-  aucune affordance visible. Si le greffon n'arrive pas à lire quelle couche est
-  affichée, il désactive le raccourci et l'annonce en console plutôt que de
-  l'autoriser partout.
+- Le greffon se déclenche **en maintenant `Ctrl`** sur la carte d'iD, et seulement
+  quand une couche cadastre y est affichée. Il n'y a pas de bouton : tant que `Ctrl`
+  est enfoncé, le mode est armé ; relâché, il ne l'est plus.
+- Cette condition sur la couche n'a rien à voir avec l'exactitude du tracé — la
+  géométrie vient toujours de l'API GeoJSON du cadastre, jamais de la couche
+  affichée. Elle garantit que vous **regardez** la source que vous tracez, ce qu'on
+  exige d'un déclencheur sans affordance visible.
+- Le mode armé fait apparaître, au survol, le contour du bâtiment cadastral sous le
+  curseur, aligné sur la couche cadastre. C'est le seul retour visuel : si le contour
+  s'affiche, le greffon est armé.
 - Cliquer crée le bâtiment dans iD, sélectionné, prêt à recevoir ses tags — comme pour
   tout objet tracé à la main.
 - `Ctrl+Z` annule la création (nœuds éventuellement créés + way) en une seule
@@ -228,8 +225,8 @@ cadastral n'est pas compté comme un refus : c'est le cas le plus courant d'un c
 ne visait rien, traité silencieusement plutôt que par un message d'erreur.
 
 Si le contexte iD n'est pas capturé au démarrage (voir la note de fiabilité plus bas),
-le greffon entier ne s'active pas : pas de bouton, un message en console qui explique
-pourquoi. Il ne reste jamais à moitié fonctionnel.
+le greffon entier ne s'active pas : `Ctrl` n'arme rien, et un message en console
+explique pourquoi. Il ne reste jamais à moitié fonctionnel.
 
 ## Fiabilité de l'intégration à iD
 
@@ -244,7 +241,8 @@ en cours de développement).
 
 Toute cette interception est isolée dans un seul module (`src/bridge/`) et protégée
 par un auto-test : si la capture échoue, ou si une primitive attendue du contexte
-manque, le greffon se désactive proprement — jamais de bouton, un message en console —
+manque, le greffon se désactive proprement — `Ctrl` n'arme plus rien, un message en
+console le dit —
 plutôt que de risquer une donnée corrompue. C'est la partie la plus fragile du projet
 face à une future mise à jour d'iD ; voir `docs/verification-manuelle.md` pour la
 vérifier après chaque mise à jour d'iD ou d'osm.org.

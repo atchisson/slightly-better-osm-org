@@ -886,61 +886,6 @@ describe('waitForSurface — attendre que la carte d’iD ait fini de s’initia
   });
 });
 
-describe('toolbarSlot — greffer dans la barre plutôt que se battre contre elle', () => {
-  // La barre d'outils d'iD est posée PAR-DESSUS la carte (relevé en navigateur :
-  // svg.surface commence à top=0, le bandeau descend jusqu'à 71 px). Un bouton posé
-  // sur la carte s'y retrouve donc enterré, présent et invisible — c'est arrivé deux
-  // fois. Ce que le bridge rend ici, ce ne sont pas des noms de classes mais des
-  // ÉLÉMENTS À IMITER : aucun sélecteur interne d'iD ne sort de src/bridge/ (§4).
-  const barre = (contenu: string): HTMLElement => {
-    const conteneur = document.createElement('div');
-    conteneur.innerHTML = `<div class="top-toolbar">${contenu}</div>`;
-    return conteneur;
-  };
-
-  it("rend l'enfant direct de la barre qui porte le bouton, pas le bouton lui-même", () => {
-    const conteneur = barre('<div class="toolbar-item"><button class="bar-button"></button></div>');
-    const slot = makeBridge(ctxAvecConteneur(conteneur)).toolbarSlot();
-
-    // L'enfant direct porte la mise en page (flex, groupes) : c'est lui qu'il faut
-    // cloner. Rendre le bouton seul produirait un contrôle mal placé dans la barre.
-    expect(slot?.item).toBe(conteneur.querySelector('.toolbar-item'));
-    expect(slot?.bouton).toBe(conteneur.querySelector('.bar-button'));
-  });
-
-  it('remonte jusqu’à l’enfant direct même si le bouton est profondément imbriqué', () => {
-    const conteneur = barre(
-      '<div class="toolbar-item"><div class="wrap"><span><button class="bar-button"></button></span></div></div>',
-    );
-    const slot = makeBridge(ctxAvecConteneur(conteneur)).toolbarSlot();
-
-    expect(slot?.item).toBe(conteneur.querySelector('.toolbar-item'));
-  });
-
-  it('rend le bouton comme son propre item quand il est enfant direct', () => {
-    const conteneur = barre('<button class="bar-button"></button>');
-    const slot = makeBridge(ctxAvecConteneur(conteneur)).toolbarSlot();
-
-    // Pas de coquille à cloner dans ce cas : l'appelant se pose à côté du bouton.
-    expect(slot?.item).toBe(slot?.bouton);
-  });
-
-  it('rend null EN LE DISANT quand la barre n’a pas la forme attendue', () => {
-    const espion = vi.spyOn(console, 'log').mockImplementation(() => {});
-    try {
-      const conteneur = document.createElement('div');
-      const bridge = makeBridge(ctxAvecConteneur(conteneur));
-
-      expect(bridge.toolbarSlot()).toBeNull();
-      // Le repli est un changement d'apparence visible : il doit se lire en console
-      // plutôt que se deviner à l'écran, comme celui de surfaceNode().
-      expect(espion).toHaveBeenCalledWith(expect.stringContaining("barre d'outils"));
-    } finally {
-      espion.mockRestore();
-    }
-  });
-});
-
 describe('cadastreVisible — trois réponses, pas deux', () => {
   // `context.background()` est la seule primitive lue par le projet que le spike n'a
   // PAS vérifiée en navigateur. D'où le troisième état, `null` : « je ne sais pas ».
@@ -1021,5 +966,118 @@ describe('cadastreVisible — trois réponses, pas deux', () => {
     }));
 
     expect(bridge.cadastreVisible()).toBe(true);
+  });
+});
+
+describe('onMapMove — se désabonner d’une carte d3, qui n’a pas d’off', () => {
+  // Constaté en navigateur : `c.map().off is not a function`, jeté à CHAQUE
+  // désactivation du mode. La carte d'iD est un dispatch d3 : on s'y désabonne en
+  // réassignant `null` au même `type.namespace`, il n'y a pas d'`off`. Le try/catch
+  // qui entourait l'abonnement donnait une fausse assurance — la fermeture de
+  // désabonnement s'exécute plus tard, en dehors de sa portée.
+  const ctxD3 = () => {
+    const listeners: Record<string, (() => void) | null> = {};
+    return {
+      map: () => ({
+        extent: () => ({ rectangle: () => [-90, -90, 90, 90] }),
+        // Convention d3 stricte : `on(type, null)` désabonne, et il n'existe PAS d'off.
+        on: (typename: string, cb: (() => void) | null) => { listeners[typename] = cb; },
+      }),
+      history: () => ({ intersects: () => [] }),
+      graph: () => ({ entity: () => ({ loc: [0, 0] }) }),
+      projection: Object.assign((p: unknown) => p, { invert: (p: unknown) => p }),
+      perform: () => {},
+      enter: () => {},
+      container: () => ({}),
+      __declencherDeplacement: () => {
+        for (const [k, cb] of Object.entries(listeners)) if (k.startsWith('move.')) cb?.();
+      },
+    };
+  };
+
+  it('se désabonne sans jeter, et le callback cesse d’être appelé', () => {
+    const ctx = ctxD3();
+    const bridge = makeBridge(ctx);
+    let appels = 0;
+    const desabonner = bridge.onMapMove(() => { appels++; });
+
+    ctx.__declencherDeplacement();
+    expect(appels).toBe(1);
+
+    expect(() => desabonner()).not.toThrow();
+    ctx.__declencherDeplacement();
+    expect(appels).toBe(1);
+  });
+
+  it('se désabonner deux fois reste inoffensif', () => {
+    const ctx = ctxD3();
+    const desabonner = makeBridge(ctx).onMapMove(() => {});
+
+    desabonner();
+    // Le mode peut se désactiver après que l'overlay s'est déjà détruit : un
+    // désabonnement ne doit jamais casser son appelant.
+    expect(() => desabonner()).not.toThrow();
+  });
+});
+
+describe('createBuilding — les entités d’iD sont des classes', () => {
+  // Constaté en navigateur, au premier clic : « class constructors must be invoked
+  // with 'new' ». Les entités d'iD (osmNode, osmWay) sont des classes ES ; ses
+  // fabriques historiques (actionAddEntity, modeSelect) restent de simples fonctions,
+  // qu'il serait faux d'appeler avec `new`. On ne devine pas : on demande à chaque
+  // fabrique ce qu'elle est.
+  const ctxSimple = () => ({
+    map: () => ({ extent: () => ({ rectangle: () => [-90, -90, 90, 90] }), on: () => {} }),
+    history: () => ({ intersects: () => [] }),
+    graph: () => ({ entity: () => ({ loc: [0, 0] }) }),
+    projection: Object.assign((p: unknown) => p, { invert: (p: unknown) => p }),
+    perform: vi.fn(),
+    enter: vi.fn(),
+    container: () => ({}),
+  });
+
+  const carre: [number, number][] = [[5, 5], [6, 5], [6, 6], [5, 6], [5, 5]];
+
+  it('instancie avec new des fabriques qui sont des classes', () => {
+    const ctx = ctxSimple();
+    class OsmNode { id = 'n1'; constructor(public props: unknown) {} }
+    class OsmWay { id = 'w1'; constructor(public props: unknown) {} }
+    (globalThis as any).iD = {
+      osmNode: OsmNode,
+      osmWay: OsmWay,
+      actionAddEntity: (e: unknown) => e,
+      modeSelect: () => ({}),
+    };
+
+    try {
+      expect(() => makeBridge(ctx).createBuilding(carre, { building: 'yes' },
+        [null, null, null, null])).not.toThrow();
+      expect(ctx.perform).toHaveBeenCalledOnce();
+      expect(ctx.enter).toHaveBeenCalledOnce();
+    } finally {
+      delete (globalThis as any).iD;
+    }
+  });
+
+  it('appelle sans new des fabriques qui sont des fonctions', () => {
+    const ctx = ctxSimple();
+    const vues: string[] = [];
+    (globalThis as any).iD = {
+      // Une fabrique historique refuse `new` si elle est appelée comme constructeur
+      // sur un objet qu'elle n'attend pas — et surtout, `new` sur une fabrique qui
+      // rend une valeur primitive rendrait l'objet vide au lieu de cette valeur.
+      osmNode: (props: unknown) => { vues.push('osmNode'); return { id: 'n1', props }; },
+      osmWay: (props: unknown) => { vues.push('osmWay'); return { id: 'w1', props }; },
+      actionAddEntity: (e: unknown) => { vues.push('action'); return e; },
+      modeSelect: () => { vues.push('modeSelect'); return {}; },
+    };
+
+    try {
+      makeBridge(ctx).createBuilding(carre, { building: 'yes' }, [null, null, null, null]);
+      expect(vues).toContain('osmNode');
+      expect(vues).toContain('modeSelect');
+    } finally {
+      delete (globalThis as any).iD;
+    }
   });
 });

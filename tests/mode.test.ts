@@ -62,7 +62,6 @@ describe('mode cadastre', () => {
       containerNode: () => container,
       whenSurfaceReady: () => Promise.resolve(true),
       surfaceNode: () => container,
-      toolbarSlot: () => null,
       cadastreVisible: () => true,
     };
   });
@@ -877,7 +876,6 @@ describe('mode cadastre — commune introuvable vs réseau (defaultLoadDataset)'
       containerNode: () => container,
       whenSurfaceReady: () => Promise.resolve(true),
       surfaceNode: () => container,
-      toolbarSlot: () => null,
       cadastreVisible: () => true,
     };
   });
@@ -959,7 +957,6 @@ describe('mode cadastre — réutilisation des nœuds sur un bâtiment de taille
       containerNode: () => container,
       whenSurfaceReady: () => Promise.resolve(true),
       surfaceNode: () => container,
-      toolbarSlot: () => null,
       cadastreVisible: () => true,
     };
 

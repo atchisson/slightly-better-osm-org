@@ -1,4 +1,4 @@
-import type { IdBridge, ToolbarSlot } from './types';
+import type { IdBridge } from './types';
 import type { ExistingBuilding } from '../conflation/overlap';
 import type { ExistingNode } from '../conflation/snap';
 import type { LonLat, Ring } from '../geometry/types';
@@ -454,13 +454,27 @@ function buildBridge(c: any): IdBridge {
       const subNs = `${ns}-move${++mapMoveSubCounter}`;
       try {
         c.map().on(`move.${subNs}`, cb);
-        return () => c.map().off(`move.${subNs}`, cb);
       } catch {
         console.log(
           "[cadastre-id] aucun signal de deplacement de carte verifie sur map() : " +
           "onMapMove n'appellera jamais son callback.",
         );
         return () => {};
+      }
+      // Le désabonnement s'exécute PLUS TARD, hors du try ci-dessus : sa protection ne
+      // l'a jamais couvert. Il jetait `c.map().off is not a function` à chaque
+      // désactivation du mode — la carte d'iD est un dispatch d3, qui n'a pas d'`off`.
+      // On s'y désabonne en réassignant `null` au même `type.namespace`. `off` reste
+      // essayé d'abord, au cas où une version d'iD en exposerait un.
+      return () => {
+        try {
+          const map = c.map();
+          if (typeof map.off === 'function') map.off(`move.${subNs}`, cb);
+          else map.on(`move.${subNs}`, null);
+        } catch {
+          // Se désabonner ne doit jamais casser l'appelant : au pire le callback
+          // survit, ce qui est sans effet sur un overlay déjà détruit.
+        }
       }
     },
 
@@ -532,16 +546,16 @@ function buildBridge(c: any): IdBridge {
       open.forEach((loc, i) => {
         const existing = reused[i];
         if (existing) { nodeIds.push(existing); return; }
-        const node = iD.osmNode({ loc });
+        const node = instancier(iD.osmNode, { loc });
         created.push(node);
         nodeIds.push(node.id);
       });
 
-      const way = iD.osmWay({ tags, nodes: [...nodeIds, nodeIds[0]!] });
-      const actions = [...created, way].map(entity => iD.actionAddEntity(entity));
+      const way = instancier(iD.osmWay, { tags, nodes: [...nodeIds, nodeIds[0]!] });
+      const actions = [...created, way].map(entity => instancier(iD.actionAddEntity, entity));
       c.perform(...actions, 'Bâtiment depuis le cadastre');
       buildingCache = null; // notre propre modification du graphe invalide le cache
-      c.enter(iD.modeSelect(c, [way.id]));
+      c.enter(instancier(iD.modeSelect, c, [way.id]));
     },
 
     prefillChangeset(comment: string, source: string): void {
@@ -608,31 +622,6 @@ function buildBridge(c: any): IdBridge {
       return container;
     },
 
-    toolbarSlot(): ToolbarSlot | null {
-      // Deuxième et dernier endroit du projet qui connaît un sélecteur interne d'iD
-      // (§4 de la spec) — et il ne le laisse pas sortir : ce qu'on rend, ce sont des
-      // éléments à imiter, pas des noms de classes.
-      const container = c.container().node() as HTMLElement;
-      const barre = typeof container?.querySelector === 'function'
-        ? container.querySelector('.top-toolbar')
-        : null;
-      const bouton = barre?.querySelector('.bar-button') ?? null;
-      if (!barre || !bouton) {
-        // Repli explicite, jamais muet : le bouton ira flotter sur la carte, où il
-        // devra se défendre seul contre le recouvrement.
-        console.log(
-          "[cadastre-id] barre d'outils d'iD introuvable (.top-toolbar / .bar-button) : " +
-          "le bouton Cadastre sera posé sur la carte au lieu d'être intégré à la barre.",
-        );
-        return null;
-      }
-      // L'enfant direct de la barre qui porte ce bouton : c'est la coquille dont
-      // dépend la mise en page (flex, groupes), donc celle qu'il faut cloner.
-      let item: Element = bouton;
-      while (item.parentElement && item.parentElement !== barre) item = item.parentElement;
-      return { item, bouton };
-    },
-
     cadastreVisible(): boolean | null {
       // `context.background()` n'a PAS été vérifié par le spike, contrairement aux
       // autres primitives lues ici. Tout est donc gardé, et l'échec rend `null` —
@@ -654,6 +643,24 @@ function buildBridge(c: any): IdBridge {
       }
     },
   };
+}
+
+/**
+ * Appelle une fabrique du namespace iD, qu'elle soit fonction ou classe.
+ *
+ * `iD.osmNode({loc})` jetait « class constructors must be invoked with 'new' » au
+ * premier clic : les entités d'iD sont des classes ES. Les fabriques historiques
+ * (`actionAddEntity`, `modeSelect`) restent, elles, de simples fonctions, qu'il
+ * serait faux d'appeler avec `new`.
+ *
+ * On ne devine donc pas : on demande à chaque fabrique ce qu'elle est. Un `new`
+ * appliqué à tort, ou omis à tort, se solde par un `TypeError` au premier clic —
+ * c'est-à-dire au pire moment, sur l'unique action que le greffon existe pour faire.
+ */
+function instancier(fabrique: any, ...args: unknown[]): any {
+  const estClasse = typeof fabrique === 'function' &&
+    /^class[\s{]/.test(Function.prototype.toString.call(fabrique));
+  return estClasse ? new fabrique(...args) : fabrique(...args);
 }
 
 /**
