@@ -39,6 +39,27 @@ export function toPolys(features: unknown[]): Poly[] {
 }
 
 /**
+ * Polygones de piscines, lus dans la couche `tsurf` déjà filtrée sur le code symbole.
+ *
+ * `offset` continue la numérotation des bâtiments : un identifiant de polygone doit
+ * rester unique dans tout le jeu, puisque `byId`, la grille et l'index des légers les
+ * mélangent.
+ */
+export function toPiscines(features: unknown[], offset: number): Poly[] {
+  const polys: Poly[] = [];
+  for (const f of features) {
+    const feat = f as { geometry?: { coordinates?: unknown } };
+    const coords = feat.geometry?.coordinates as Ring[] | undefined;
+    const outer = coords?.[0];
+    if (!outer || outer.length < 4) continue;
+    // `tsurf` est une couche de polygones simples, pas de multipolygones : un seul
+    // niveau de tableau de moins que la couche bâtiments.
+    polys.push({ id: offset + polys.length, type: 'piscine', outer, holes: coords!.slice(1) });
+  }
+  return polys;
+}
+
+/**
  * Table id-de-léger -> composante entière (orpheline ou non) et son propriétaire.
  * Construite une seule fois par commune, depuis lightComponents() — voir la revue de la
  * Task 8 : composeFor() reconstruisait auparavant cette table à chaque appel (donc à
@@ -62,8 +83,18 @@ export function buildLightIndex(
 
 const cellKey = (x: number, y: number): string => `${Math.floor(x / CELL)}:${Math.floor(y / CELL)}`;
 
-export function buildDataset(insee: string, millesime: string, features: unknown[]): Dataset {
-  const polys = toPolys(features);
+export function buildDataset(
+  insee: string,
+  millesime: string,
+  features: unknown[],
+  piscines: unknown[] = [],
+): Dataset {
+  const batiments = toPolys(features);
+  // Les piscines rejoignent le même tableau : elles partagent le survol, la grille et
+  // le recalage. Elles ne participent en revanche à aucune composante légère —
+  // `lightComponents` ne retient que le type `02`, et `isHard` ne les reconnaît pas,
+  // donc une piscine ne peut ni absorber ni être absorbée.
+  const polys = [...batiments, ...toPiscines(piscines, batiments.length)];
   // edgeIndex n'est nécessaire que pour calculer les composantes légères : il n'est lu
   // par aucun code après buildDataset (composeFor le déclarait sans jamais le consulter).
   // Mesuré à 82,6 Mo sur Angers — 95 % du coût de polys+index — c'est délibérément une

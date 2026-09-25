@@ -316,6 +316,11 @@ function taggedBuilding(tags: any): boolean {
   return !!tags?.building && tags.building !== 'no';
 }
 
+/** Une piscine OSM : c'est à elle, et non aux bâtiments, qu'une piscine fait doublon. */
+function taggedPool(tags: any): boolean {
+  return tags?.leisure === 'swimming_pool';
+}
+
 /**
  * Ways membres (hors rôle `inner`) d'une relation taguée `building`.
  *
@@ -391,9 +396,10 @@ function buildBridge(c: any): IdBridge {
       .filter(e =>
         e.type === 'way' &&
         Array.isArray(e.nodes) &&
-        (taggedBuilding(e.tags) || membresDeRelation.has(e.id as string)))
+        (taggedBuilding(e.tags) || taggedPool(e.tags) || membresDeRelation.has(e.id as string)))
       .map(e => ({
         id: e.id as string,
+        kind: (taggedPool(e.tags) ? 'piscine' : 'batiment') as 'batiment' | 'piscine',
         ring: (e.nodes as string[]).map(id => graph.entity(id).loc as LonLat),
         // Les nœuds, pas seulement leurs positions : insérer un sommet dans un mur
         // existant se désigne par l'arête `[idA, idB]` qu'il coupe (voir

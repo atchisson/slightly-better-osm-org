@@ -330,3 +330,49 @@ describe('composeAt — deux composantes légères disjointes sous la même ancr
     expect(composeAt([-0.0005, 0.0005], input)).toEqual(parMaison);
   });
 });
+
+describe('piscines — ni absorbées, ni absorbantes', () => {
+  // Une piscine vient d'une autre couche du cadastre (`tsurf`, surfaces
+  // topographiques) et n'est pas un bâtiment. Elle traverse le même pipeline —
+  // survol, composition, recalage — mais ne doit jamais se réunir à quoi que ce soit.
+  const M = 1 / 111320;
+  const poly = (id: number, type: Poly['type'], x0: number, x1: number): Poly => ({
+    id, type, holes: [],
+    outer: [[x0 * M, 0], [x1 * M, 0], [x1 * M, 5 * M], [x0 * M, 5 * M], [x0 * M, 0]],
+  });
+
+  const prep = (polys: Poly[]) => ({
+    polys,
+    absorption: new Map<number, number[]>(),
+    byId: new Map(polys.map(p => [p.id, p])),
+    lightIndex: new Map<number, { ownerId: number | null; members: number[] }>(),
+  });
+
+  it('se compose seule et se déclare piscine', () => {
+    const piscine = poly(1, 'piscine', 0, 8);
+
+    const r = composeFor(1, prep([piscine]));
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.isPiscine).toBe(true);
+    // `isolatedLight` pose `wall=no` : une piscine n'est pas une construction légère.
+    expect(r.isolatedLight).toBe(false);
+    expect(r.absorbed).toEqual([]);
+  });
+
+  it('n’absorbe pas un abri de jardin qui la borde', () => {
+    const piscine = poly(1, 'piscine', 0, 8);
+    const abri = poly(2, '02', 8, 12);
+    const input = prep([piscine, abri]);
+    // Même si une absorption avait été calculée à tort en amont, la composition ne
+    // doit pas la suivre : une piscine ne fusionne avec rien.
+    input.absorption.set(1, [2]);
+
+    const r = composeFor(1, input);
+
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.absorbed).toEqual([]);
+  });
+});

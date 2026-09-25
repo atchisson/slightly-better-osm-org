@@ -76,6 +76,15 @@ nouvel onglet, sans passer par la carte.
         with 'new'` (les entités d'iD sont des classes), ni `map().off is not a
         function` (la carte d'iD est un dispatch d3, sans `off`). Ces deux-là ont été
         constatées en session réelle.
+- [ ] **Piscines.** Sur une commune qui en compte (le Var en est plein), survoler une
+      piscine doit afficher son contour, et le clic la créer avec
+      `leisure=swimming_pool` + `access=private` — jamais `building`, jamais `wall=no`.
+      - Une piscine bordée d'un abri de jardin ne doit PAS l'absorber : le contour
+        s'arrête au bassin.
+      - Une piscine déjà cartographiée dans OSM doit être refusée ; une maison
+        mitoyenne ne doit rien refuser du tout.
+      - Une commune sans fichier `tsurf` doit se charger normalement, sans message :
+        l'absence de piscines est un cas ordinaire, pas une panne.
 - [ ] **Fusion de deux bâtiments** (opération DESTRUCTRICE : elle supprime une voie
       existante — à vérifier avant de s'en servir pour de bon).
       - Sélectionner deux bâtiments mitoyens, clic droit : l'entrée « Fusionner

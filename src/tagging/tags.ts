@@ -41,6 +41,27 @@ export function buildingTags(input: TagInput): Record<string, string> {
   return tags;
 }
 
+/**
+ * Tags d'une piscine créée depuis le cadastre.
+ *
+ * `access=private` est un choix explicite de l'utilisateur de cet outil, pas une
+ * déduction : **le cadastre ne dit rien du régime d'accès**. Il ne distingue pas la
+ * piscine d'un particulier de celle d'un camping ou d'un hôtel, et ce tag sera donc
+ * faux sur une petite minorité d'objets. C'est l'usage majoritaire pour le bassin
+ * résidentiel, qui est l'écrasante majorité du gisement — à revoir si cet outil
+ * servait un jour à cartographier des équipements collectifs.
+ *
+ * Pas de `building` : une piscine n'est pas un bâtiment, et la couche d'où elle vient
+ * n'est pas celle des bâtiments.
+ */
+export function poolTags(millesime: string): Record<string, string> {
+  return {
+    leisure: 'swimming_pool',
+    access: 'private',
+    source: SOURCE_PREFIX + requireMillesime(millesime),
+  };
+}
+
 export function changesetComment(commune: string): string {
   return `Bâtiments depuis le cadastre (${commune})`;
 }

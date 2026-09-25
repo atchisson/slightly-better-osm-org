@@ -26,10 +26,16 @@ export type RefusalReason =
   | 'pincement' | 'trou' | 'parties-multiples' | 'vide' | 'chevauchement';
 
 export type Composition =
-  | { ok: true; ring: Ring; anchorId: number; absorbed: number[]; isolatedLight: boolean }
+  | {
+      ok: true; ring: Ring; anchorId: number; absorbed: number[];
+      isolatedLight: boolean;
+      /** une piscine ne se tague pas comme un bâtiment, et ne fusionne avec rien */
+      isPiscine: boolean;
+    }
   | { ok: false; reason: RefusalReason };
 
 const isHard = (p: Poly): boolean => p.type === '01' || p.type === '03';
+const isPiscine = (p: Poly): boolean => p.type === 'piscine';
 
 const vertexKey = (p: LonLat): string => `${p[0]},${p[1]}`;
 
@@ -111,6 +117,9 @@ function anchorOf(poly: Poly, input: ComposeInput): number {
  * orphelins doivent être unis, pas seulement celui qui a été visé.
  */
 function absorbedBy(anchor: Poly, anchorId: number, input: ComposeInput): number[] {
+  // Une piscine n'absorbe rien : elle n'est pas un bâtiment, et rien ne doit jamais
+  // la réunir à un abri de jardin qui la borde.
+  if (isPiscine(anchor)) return [];
   if (isHard(anchor)) return input.absorption.get(anchorId) ?? [];
   const entry = input.lightIndex.get(anchorId);
   if (entry?.ownerId !== null) return [];
@@ -150,7 +159,8 @@ export function composeFor(anchorId: number, input: ComposeInput): Composition {
     ring: cleaned,
     anchorId,
     absorbed: [...absorbed].sort((a, b) => a - b),
-    isolatedLight: !isHard(anchor),
+    isolatedLight: !isHard(anchor) && !isPiscine(anchor),
+    isPiscine: isPiscine(anchor),
   };
 }
 

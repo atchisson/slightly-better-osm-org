@@ -5,6 +5,15 @@ export interface ExistingBuilding {
   id: string;
   ring: Ring;
   /**
+   * Bâtiment ou piscine.
+   *
+   * Un objet ne fait doublon qu'avec un objet de même nature : une maison qui borde
+   * une piscine ne couvre rien de la piscine, et une piscine déjà cartographiée ne
+   * serait jamais vue si l'on ne cherchait que des bâtiments. Absent = bâtiment, pour
+   * qu'un appelant qui n'a pas à s'en soucier n'ait rien à écrire.
+   */
+  kind?: 'batiment' | 'piscine';
+  /**
    * Les nœuds OSM de ce contour, dans l'ordre de `ring` (donc même longueur, premier
    * et dernier identiques). Ils sont requis pour insérer un sommet DANS le mur de ce
    * bâtiment : une insertion se désigne par l'arête `[idA, idB]` qu'elle coupe, pas

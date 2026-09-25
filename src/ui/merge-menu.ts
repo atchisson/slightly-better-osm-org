@@ -28,6 +28,26 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
  */
 const TRACE_ICONE = 'M4 5 h8 v7 h8 v7 H4 Z';
 
+/** Repli si la couleur des icônes d'iD n'est pas lisible : son menu est sombre. */
+const COULEUR_REPLI = '#fff';
+
+/**
+ * La couleur dont iD peint ses propres icônes de menu, lue sur un voisin.
+ *
+ * Mesurée plutôt qu'écrite : `currentColor` ne convient pas — il suit la couleur de
+ * TEXTE du bouton, qui n'est pas celle de son icône, et donnait un tracé noir dans un
+ * menu sombre. Lire le voisin donne le bon ton ici, et le suivra si iD change de
+ * thème, ce qu'une valeur en dur ne ferait pas.
+ */
+function couleurDesIcones(modele: Element): string {
+  try {
+    const cible = modele.querySelector('use') ?? modele.querySelector('svg') ?? modele;
+    const fill = getComputedStyle(cible).fill;
+    if (fill && fill !== 'none') return fill;
+  } catch { /* environnement sans mise en page : on prend le repli */ }
+  return COULEUR_REPLI;
+}
+
 const REFUS: Record<string, string> = {
   'pas-deux': 'Sélectionnez exactement deux bâtiments pour les fusionner.',
   'pas-mitoyens': 'Ces deux bâtiments ne se touchent pas : la fusion donnerait deux morceaux séparés.',
@@ -91,6 +111,7 @@ export function attachMergeMenu(bridge: IdBridge, hooks: MergeMenuHooks): () => 
     // couleur que le menu d'iD applique à ses icônes — et on remplace son contenu par
     // notre tracé. Vider puis remettre supprime au passage tout libellé que le voisin
     // porterait.
+    const couleur = couleurDesIcones(modele);
     const icone = item.querySelector('svg');
     item.textContent = '';
     if (icone) {
@@ -99,10 +120,10 @@ export function attachMergeMenu(bridge: IdBridge, hooks: MergeMenuHooks): () => 
       const trace = document.createElementNS(SVG_NS, 'path');
       trace.setAttribute('d', TRACE_ICONE);
       // En style EN LIGNE, pas en attributs : les règles CSS d'iD sur ses icônes
-      // (`fill: currentColor`) l'emporteraient sur de simples attributs de présentation
-      // et rempliraient le contour.
+      // (`fill: currentColor`) l'emporteraient sur de simples attributs de
+      // présentation et rempliraient le contour.
       trace.setAttribute('style',
-        'fill:none;stroke:currentColor;stroke-width:2;stroke-linejoin:round');
+        `fill:none;stroke:${couleur};stroke-width:2;stroke-linejoin:round`);
       icone.appendChild(trace);
       item.appendChild(icone);
     }

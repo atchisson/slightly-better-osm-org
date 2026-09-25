@@ -86,6 +86,26 @@ d'autre que lire et manipuler la page d'édition elle-même.
   s'affiche, le greffon est armé.
 - Cliquer crée le bâtiment dans iD, sélectionné, prêt à recevoir ses tags — comme pour
   tout objet tracé à la main.
+- **Les piscines aussi.** Elles ne sont pas dans la couche des bâtiments du cadastre
+  mais dans celle des surfaces topographiques (`tsurf`), d'où elles sont reconnues à
+  leur code symbole. Survolez-en une, cliquez : elle est créée avec
+  `leisure=swimming_pool` + `access=private`, et la même attribution que tout le reste.
+  Une piscine ne fusionne jamais avec rien — ni avec un bâtiment, ni avec l'abri de
+  jardin qui la borde — et son contrôle de doublon la compare aux piscines déjà
+  cartographiées, pas aux maisons voisines.
+
+  `access=private` est un **choix**, pas une déduction : le cadastre ne dit rien du
+  régime d'accès et ne distingue pas la piscine d'un particulier de celle d'un camping.
+  C'est l'usage majoritaire du gisement, et ce tag sera faux sur une petite minorité
+  d'objets.
+
+  Le code symbole a été vérifié contre les piscines déjà présentes dans OSM, sur deux
+  communes de profils opposés : 73,5 % de correspondance au Lavandou, 65,1 % à Angers.
+  Un second code semblait tout aussi convaincant dans le Var (81 %) et s'effondrait à
+  Angers (1 %) — un artefact de densité, écarté. Le quart d'objets sans correspondance
+  est vraisemblablement constitué de piscines non encore cartographiées : c'est
+  précisément ce que cet outil sert à ajouter.
+
 - **Fusionner deux bâtiments.** Un bâtiment à cheval sur deux parcelles est découpé
   en deux par le cadastre, alors que c'est un seul bâtiment — un seul toit traversé
   par une limite de propriété. Sélectionnez les deux dans iD, puis **clic droit →

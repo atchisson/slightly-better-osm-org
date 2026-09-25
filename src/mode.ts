@@ -7,7 +7,7 @@ import { communeAt } from './cadastre/insee';
 import { overlapsExisting } from './conflation/overlap';
 import { snapToExistingNodes, planInsertions, DEFAULT_SNAP_TOLERANCE_M } from './conflation/snap';
 import { dilatedExtent } from './geometry/edges';
-import { buildingTags, changesetComment, changesetSource } from './tagging/tags';
+import { buildingTags, poolTags, changesetComment, changesetSource } from './tagging/tags';
 import { createOverlay, type Overlay } from './ui/overlay';
 import { refusalMessage } from './ui/messages';
 import type { IdBridge } from './bridge/types';
@@ -75,19 +75,19 @@ async function defaultLoadDataset(pt: LonLat): Promise<Dataset> {
   const commune = await communeAt(pt[1], pt[0]);
   if (!commune) throw new CommuneIntrouvableError();
   const cached = await readCache(commune.code);
-  if (cached) return buildDataset(cached.insee, cached.millesime, cached.features);
-  const { features, millesime } = await downloadCommune(commune.code);
+  if (cached) return buildDataset(cached.insee, cached.millesime, cached.features, cached.piscines);
+  const { features, piscines, millesime } = await downloadCommune(commune.code);
   // Le cache est un confort, jamais une condition du chargement : il est délibérément
   // HORS du chemin de retour. `await writeCache(...)` faisait échouer tout le
   // chargement APRÈS un téléchargement réussi si IndexedDB refusait l'écriture — un
   // dépassement de quota, vraisemblable sur Paris ou Marseille et leur centaine de Mo
   // de features sérialisées — et la personne lisait alors « vérifiez votre connexion »
   // alors que le réseau avait parfaitement fonctionné.
-  void writeCache({ insee: commune.code, millesime, fetchedAt: Date.now(), features })
+  void writeCache({ insee: commune.code, millesime, fetchedAt: Date.now(), features, piscines })
     .catch(err => console.warn(
       '[cadastre-id] mise en cache impossible (les données restent utilisables, elles seront ' +
       'retéléchargées à la prochaine session) :', err));
-  return buildDataset(commune.code, millesime, features);
+  return buildDataset(commune.code, millesime, features, piscines);
 }
 
 export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): CadastreMode {
@@ -395,7 +395,13 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
         if (r.reason !== 'aucun-batiment') notify(refusalMessage(r.reason));
         return;
       }
-      if (overlapsExisting(r.ring, bridge.buildingsNear(bridge.mapExtent()))) {
+      // Un objet ne fait doublon qu'avec un objet de même nature. Sans ce filtre, une
+      // piscine serait déclarée déjà cartographiée à cause de la maison qui la borde,
+      // et une piscine déjà présente dans OSM passerait inaperçue.
+      const memeNature = (b: { kind?: string }): boolean =>
+        (b.kind === 'piscine') === r.isPiscine;
+      const existants = bridge.buildingsNear(bridge.mapExtent()).filter(memeNature);
+      if (overlapsExisting(r.ring, existants)) {
         notify(refusalMessage('batiment-existant'));
         return;
       }
@@ -414,7 +420,9 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       // pendant l'attente du nom de commune, et l'attribution doit rester celle du jeu
       // de données qui a réellement produit cette géométrie.
       const millesime = dataset.millesime;
-      const tags = buildingTags({ isolatedLight: r.isolatedLight, millesime });
+      const tags = r.isPiscine
+        ? poolTags(millesime)
+        : buildingTags({ isolatedLight: r.isolatedLight, millesime });
 
       // Un sommet qui n'a trouvé aucun nœud à réutiliser mais qui tombe sur le MUR
       // d'un bâtiment OSM existant y est inséré : les deux bâtiments partagent alors
@@ -425,7 +433,8 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       const insertions = planInsertions(
         snapped.ring,
         snapped.reused,
-        bridge.buildingsNear(dilatedExtent(snapped.ring, DEFAULT_SNAP_TOLERANCE_M)),
+        bridge.buildingsNear(dilatedExtent(snapped.ring, DEFAULT_SNAP_TOLERANCE_M))
+          .filter(memeNature),
         DEFAULT_SNAP_TOLERANCE_M);
 
       bridge.createBuilding(snapped.ring, tags, snapped.reused, insertions);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildingTags, changesetComment, changesetSource } from '../../src/tagging/tags';
+import { buildingTags, changesetComment, changesetSource, poolTags } from '../../src/tagging/tags';
 
 describe('buildingTags', () => {
   it('pose building=yes et la source verbatim avec le millésime', () => {
@@ -51,5 +51,32 @@ describe('changesetSource', () => {
 
   it('refuse un millésime invalide, comme buildingTags', () => {
     expect(() => changesetSource('latest')).toThrow(/millésime/i);
+  });
+});
+
+describe('poolTags', () => {
+  it('tague une piscine, pas un bâtiment', () => {
+    const t = poolTags('2026');
+
+    expect(t['leisure']).toBe('swimming_pool');
+    // Pas de `building` : une piscine n'en est pas un, et elle ne vient même pas de
+    // la couche des bâtiments.
+    expect(t['building']).toBeUndefined();
+    expect(t['wall']).toBeUndefined();
+  });
+
+  it('pose access=private, qui est un choix et non une déduction', () => {
+    // Le cadastre ne dit rien du régime d'accès et ne distingue pas la piscine d'un
+    // particulier de celle d'un camping. C'est l'usage majoritaire du gisement, pas
+    // une information lue dans la donnée.
+    expect(poolTags('2026')['access']).toBe('private');
+  });
+
+  it('porte la même attribution que tout objet créé', () => {
+    expect(poolTags('2026')['source']).toContain('Mise à jour : 2026');
+  });
+
+  it('refuse un millésime qui n’est pas une année', () => {
+    expect(() => poolTags('latest')).toThrow(/millésime/i);
   });
 });

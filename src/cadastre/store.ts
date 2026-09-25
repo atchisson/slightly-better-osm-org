@@ -3,6 +3,12 @@ export interface CachedCommune {
   millesime: string;
   fetchedAt: number;
   features: unknown[];
+  /**
+   * Piscines de la commune (couche `tsurf`). Optionnelle : une entrée écrite avant
+   * leur prise en charge n'en a pas, et doit rester lisible — la faire expirer
+   * obligerait à retélécharger des dizaines de mégaoctets pour un ajout mineur.
+   */
+  piscines?: unknown[];
 }
 
 const DB = 'cadastre-id';

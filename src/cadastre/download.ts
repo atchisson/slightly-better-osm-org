@@ -29,6 +29,43 @@ export function datasetUrl(insee: string, millesime: string): string {
   return `${BUCKET}/etalab-cadastre/${millesime}/geojson/communes/${dep}/${insee}/cadastre-${insee}-batiments.json.gz`;
 }
 
+/**
+ * Couche des surfaces topographiques du PCI, d'où viennent les piscines.
+ *
+ * Elles ne sont PAS dans la couche bâtiments — vérifié : celle-ci ne porte que les
+ * types `01` et `02`. Elles vivent dans `tsurf`, sous le dossier `raw/` du dépôt, et
+ * s'y reconnaissent au code symbole 65 (voir `estPiscine`).
+ */
+export function tsurfUrl(insee: string, millesime: string): string {
+  const dep = departementOf(insee);
+  return `${BUCKET}/etalab-cadastre/${millesime}/geojson/communes/${dep}/${insee}/raw/pci-${insee}-tsurf.json.gz`;
+}
+
+/**
+ * Code symbole des piscines dans la couche `tsurf`.
+ *
+ * **Mesuré, pas supposé.** Confronté aux piscines déjà cartographiées dans OSM, sur
+ * deux communes de profils opposés :
+ *
+ * | SYM | Le Lavandou (83069) | Angers (49007) |
+ * |-----|---------------------|----------------|
+ * | 65  | 73,5 %              | 65,1 %         |
+ * | 34  | 81,4 %              | **1,0 %**      |
+ * | 33  | 3,3 %               | 0 %            |
+ *
+ * `34` semblait convaincant dans le Var — c'était un artefact de densité : là-bas ses
+ * objets (38 m² de médiane) voisinent les piscines, alors qu'à Angers ils en font 379
+ * et n'ont rien à voir. Seul `65` tient sur les deux. Les 4 objets étiquetés
+ * « piscine » de la commune 28404 portent tous ce code.
+ *
+ * Les 26 à 35 % sans correspondance OSM sont vraisemblablement des piscines non
+ * encore cartographiées — précisément ce que cet outil sert à ajouter.
+ */
+const SYM_PISCINE = '65';
+
+const estPiscine = (f: unknown): boolean =>
+  (f as { properties?: { SYM?: unknown } })?.properties?.SYM === SYM_PISCINE;
+
 /** Le jeu demandé n'existe pas à ce millésime — distinct de toute autre panne. */
 export class DatasetIntrouvable extends Error {}
 
@@ -57,6 +94,29 @@ async function fetchMillesimes(fetchFn: typeof fetch): Promise<string[]> {
   return millesimesFromListing(await res.text());
 }
 
+/**
+ * Piscines d'une commune à un millésime donné.
+ *
+ * Une couche absente n'est pas une panne : toutes les communes n'ont pas de fichier
+ * `tsurf`, et une commune sans piscine est un cas parfaitement ordinaire. On rend
+ * alors une liste vide plutôt que de faire échouer le chargement des bâtiments.
+ */
+async function downloadPiscines(
+  insee: string,
+  millesime: string,
+  fetchFn: typeof fetch,
+): Promise<unknown[]> {
+  try {
+    const res = await fetchFn(tsurfUrl(insee, millesime));
+    if (!res.ok || !res.body) return [];
+    const stream = res.body.pipeThrough(new DecompressionStream('gzip'));
+    const parsed = JSON.parse(await new Response(stream).text()) as { features?: unknown[] };
+    return (parsed.features ?? []).filter(estPiscine);
+  } catch {
+    return [];
+  }
+}
+
 async function downloadOne(
   insee: string,
   millesime: string,
@@ -79,7 +139,7 @@ async function downloadOne(
 export async function downloadCommune(
   insee: string,
   fetchFn: typeof fetch = fetch,
-): Promise<{ features: unknown[]; millesime: string }> {
+): Promise<{ features: unknown[]; piscines: unknown[]; millesime: string }> {
   const millesimes = await fetchMillesimes(fetchFn);
 
   // Paris, Lyon et Marseille n'existent pas sous leur code commune dans le jeu Etalab :
@@ -106,13 +166,16 @@ export async function downloadCommune(
   for (const millesime of candidats) {
     try {
       const parts = await Promise.all(codes.map(code => downloadOne(code, millesime, fetchFn)));
+      // Les piscines seulement une fois les bâtiments obtenus : leur absence ne doit
+      // jamais empêcher un repli de millésime sur les bâtiments, qui sont l'essentiel.
+      const piscines = await Promise.all(codes.map(code => downloadPiscines(code, millesime, fetchFn)));
       if (millesime !== candidats[0]) {
         console.warn(
           `[cadastre-id] ${insee} absent du millésime ${candidats[0]} ; repli sur ` +
           `${millesime}. Le dépôt est probablement en cours de republication.`,
         );
       }
-      return { features: parts.flat(), millesime: millesime.slice(0, 4) };
+      return { features: parts.flat(), piscines: piscines.flat(), millesime: millesime.slice(0, 4) };
     } catch (err) {
       if (!(err instanceof DatasetIntrouvable)) throw err;
       absence = err;

@@ -143,7 +143,10 @@ describe('attachMergeMenu', () => {
     // Le style est en ligne : les règles d'iD sur ses icônes rempliraient sinon le
     // contour, qui doit rester un contour.
     expect(trace?.getAttribute('style')).toMatch(/fill:\s*none/);
-    expect(trace?.getAttribute('style')).toMatch(/stroke:\s*currentColor/);
+    // Repli blanc quand la couleur des icônes n'est pas lisible : le menu d'iD est
+    // sombre, et `currentColor` y donnait un tracé noir — il suit la couleur de TEXTE
+    // du bouton, pas celle de son icône.
+    expect(trace?.getAttribute('style')).toMatch(/stroke:\s*#fff/);
   });
 
   it('n’hérite pas d’un voisin désactivé', () => {

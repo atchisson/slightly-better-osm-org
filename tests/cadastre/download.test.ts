@@ -129,7 +129,8 @@ describe('downloadCommune', () => {
 
     const urls = (fetchFn as unknown as { mock: { calls: string[][] } }).mock.calls
       .map(c => c[0]!).filter(u => u !== LISTING_URL);
-    expect(urls).toHaveLength(20);
+    expect(urls.filter(u => u.includes('-batiments.'))).toHaveLength(20);
+    expect(urls.filter(u => u.includes('-tsurf.'))).toHaveLength(20);
     expect(r.features).toHaveLength(20);
     // c'est bien le code arrondissement qui est demandé, jamais 75056
     for (const url of urls) expect(url).not.toContain('75056');
@@ -148,5 +149,52 @@ describe('downloadCommune', () => {
     const urls = (fetchFn as unknown as { mock: { calls: string[][] } }).mock.calls
       .map(c => c[0]!).filter(u => u !== LISTING_URL);
     expect(urls.every(u => u.includes('/2026-06-01/'))).toBe(true);
+  });
+});
+
+describe('piscines', () => {
+  const tsurf = (syms: string[]) => ({
+    features: syms.map(SYM => ({
+      properties: { SYM },
+      geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]] },
+    })),
+  });
+
+  const gzip = async (text: string): Promise<ArrayBuffer> => {
+    const cs = new CompressionStream('gzip');
+    return new Response(new Blob([text]).stream().pipeThrough(cs)).arrayBuffer();
+  };
+
+  it('ne retient que le code symbole des piscines', async () => {
+    // Mesuré contre les piscines déjà cartographiées dans OSM : seul 65 tient sur deux
+    // communes de profils opposés. 34 semblait convaincant dans le Var (81 %) et
+    // s'effondre à Angers (1 %) — un artefact de densité.
+    const bat = await gzip(JSON.stringify({ features: [] }));
+    const sur = await gzip(JSON.stringify(tsurf(['65', '34', '33', '65'])));
+    const fetchFn = vi.fn().mockImplementation(async (url: string) => {
+      if (url === LISTING_URL) return { ok: true, status: 200, text: async () => listing('2026-06-01') };
+      return { ok: true, status: 200,
+        body: new Blob([url.includes('tsurf') ? sur : bat]).stream() };
+    }) as unknown as typeof fetch;
+
+    const r = await downloadCommune('49007', fetchFn);
+
+    expect(r.piscines).toHaveLength(2);
+  });
+
+  it('se passe d’une couche tsurf absente sans faire échouer les bâtiments', async () => {
+    // Toutes les communes n'ont pas ce fichier, et une commune sans piscine est un cas
+    // parfaitement ordinaire : ce n'est pas une panne.
+    const bat = await gzip(JSON.stringify({ features: [{ a: 1 }] }));
+    const fetchFn = vi.fn().mockImplementation(async (url: string) => {
+      if (url === LISTING_URL) return { ok: true, status: 200, text: async () => listing('2026-06-01') };
+      if (url.includes('tsurf')) return { ok: false, status: 404 };
+      return { ok: true, status: 200, body: new Blob([bat]).stream() };
+    }) as unknown as typeof fetch;
+
+    const r = await downloadCommune('49007', fetchFn);
+
+    expect(r.features).toHaveLength(1);
+    expect(r.piscines).toEqual([]);
   });
 });
