@@ -83,7 +83,7 @@ async function defaultLoadDataset(pt: LonLat): Promise<Dataset> {
     if (piscines === undefined) {
       piscines = await downloadPiscinesForYear(cached.insee, cached.millesime);
       console.log(
-        `[cadastre-id] ${piscines.length} piscine(s) ajoutées au cache de ${cached.insee} ` +
+        `[sb-osm] ${piscines.length} piscine(s) ajoutées au cache de ${cached.insee} ` +
         '(entrée écrite avant leur prise en charge).',
       );
       void writeCache({ ...cached, piscines }).catch(() => { /* confort, jamais bloquant */ });
@@ -99,7 +99,7 @@ async function defaultLoadDataset(pt: LonLat): Promise<Dataset> {
   // alors que le réseau avait parfaitement fonctionné.
   void writeCache({ insee: commune.code, millesime, fetchedAt: Date.now(), features, piscines })
     .catch(err => console.warn(
-      '[cadastre-id] mise en cache impossible (les données restent utilisables, elles seront ' +
+      '[sb-osm] mise en cache impossible (les données restent utilisables, elles seront ' +
       'retéléchargées à la prochaine session) :', err));
   return buildDataset(commune.code, millesime, features, piscines);
 }
@@ -110,7 +110,7 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
     (await communeAt(pt[1], pt[0]))?.code ?? null);
   const communeName = deps.communeName ?? (async (pt: LonLat) =>
     (await communeAt(pt[1], pt[0]))?.nom ?? '');
-  const notify = deps.notify ?? ((m: string) => console.warn('[cadastre-id]', m));
+  const notify = deps.notify ?? ((m: string) => console.warn('[sb-osm]', m));
 
   let enabled = false;
   let overlay: Overlay | null = null;

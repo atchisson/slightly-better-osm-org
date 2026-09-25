@@ -1,7 +1,15 @@
-# cadastre-id
+# slightly better osm org
 
-Userscript qui ajoute à l'éditeur iD, sur `openstreetmap.org`, la création d'un
-bâtiment OSM à partir du cadastre français, en un clic.
+Greffon d'édition pour **iD**, l'éditeur d'OpenStreetMap. Il s'appelait
+`cadastre-id` tant qu'il ne faisait qu'importer le cadastre ; il fusionne
+maintenant des bâtiments et corrige des tracés, ce qui n'a plus rien de
+cadastral. Le nom de sa base de cache, lui, n'a pas changé : le renommer aurait
+obligé chaque utilisateur à retélécharger sa commune, sans rien y gagner.
+
+Userscript qui ajoute à l'éditeur iD, sur `openstreetmap.org` : la création d'un
+bâtiment ou d'une piscine à partir du cadastre français en un clic, la fusion de
+deux bâtiments qu'une limite de parcelle a coupés en deux, et la correction du
+tracé d'une voie existante.
 
 En mode cadastre, survoler un bâtiment cadastral affiche son contour final tel qu'il
 sera créé. Cliquer le crée dans iD, tagué et sélectionné, prêt à être complété à la
@@ -62,7 +70,7 @@ npm install
 npm run build
 ```
 
-`npm run build` produit `dist/cadastre-id.user.js`, un fichier unique (bandeau de
+`npm run build` produit `dist/slightly-better-osm-org.user.js`, un fichier unique (bandeau de
 métadonnées Tampermonkey inclus, cf. `src/meta.ts`). Ouvrez ce fichier dans le
 navigateur, ou glissez-le dans le tableau de bord de l'extension : Violentmonkey et
 Tampermonkey détectent tous les deux l'extension `.user.js` et proposent
@@ -109,7 +117,7 @@ d'autre que lire et manipuler la page d'édition elle-même.
 - **Fusionner deux bâtiments.** Un bâtiment à cheval sur deux parcelles est découpé
   en deux par le cadastre, alors que c'est un seul bâtiment — un seul toit traversé
   par une limite de propriété. Sélectionnez les deux dans iD, puis **clic droit →
-  « Fusionner (cadastre-id) »**, ou **`Alt+F`**. iD ne sait pas le faire : son
+  « Fusionner (slightly better osm org) »**, ou **`Alt+F`**. iD ne sait pas le faire : son
   opération « Combiner » produit un multipolygone, pas une voie unique.
 
   La plus grande des deux voies est **conservée** — son identifiant, son historique et

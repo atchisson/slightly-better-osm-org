@@ -11,6 +11,14 @@ export interface CachedCommune {
   piscines?: unknown[];
 }
 
+/**
+ * Nom de la base IndexedDB — **inchangé malgré le renommage du greffon**.
+ *
+ * Le renommer orphelinerait tous les caches existants : chaque utilisateur
+ * retéléchargerait sa commune, des dizaines de mégaoctets pour Paris ou Marseille,
+ * sans rien y gagner. Un nom de base n'est pas une identité publique, c'est une clé
+ * de stockage.
+ */
 const DB = 'cadastre-id';
 const STORE = 'communes';
 

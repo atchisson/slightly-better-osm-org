@@ -1,7 +1,7 @@
 export const USERSCRIPT_META = `// ==UserScript==
-// @name         cadastre-id
-// @namespace    https://github.com/alenoir/cadastre-id
-// @description  Crée un bâtiment OSM depuis le cadastre français, en un clic, dans iD
+// @name         slightly-better-osm-org
+// @namespace    https://github.com/atchisson/slightly-better-osm-org
+// @description  Outils d'édition pour iD : bâtiments et piscines depuis le cadastre français, fusion de deux bâtiments, correction de tracé
 // @match        https://www.openstreetmap.org/edit*
 // @match        https://www.openstreetmap.org/id*
 // @run-at       document-start

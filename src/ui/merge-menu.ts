@@ -7,7 +7,7 @@ export interface MergeMenuHooks {
   notify(message: string): void;
 }
 
-export const LIBELLE = 'Fusionner (cadastre-id)';
+export const LIBELLE = 'Fusionner en une seule voie';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 

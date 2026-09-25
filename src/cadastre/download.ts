@@ -202,7 +202,7 @@ export async function downloadCommune(
       const piscines = await Promise.all(codes.map(code => downloadPiscines(code, millesime, fetchFn)));
       if (millesime !== candidats[0]) {
         console.warn(
-          `[cadastre-id] ${insee} absent du millésime ${candidats[0]} ; repli sur ` +
+          `[sb-osm] ${insee} absent du millésime ${candidats[0]} ; repli sur ` +
           `${millesime}. Le dépôt est probablement en cours de republication.`,
         );
       }

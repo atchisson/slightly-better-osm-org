@@ -44,19 +44,19 @@ cas échéant).
 Ouvrir directement `https://www.openstreetmap.org/edit` (ou `/edit#map=...`) dans un
 nouvel onglet, sans passer par la carte.
 
-- [ ] `[cadastre-id] prêt` apparaît dans la console (cadre `/id`, voir plus haut)
+- [ ] `[sb-osm] prêt` apparaît dans la console (cadre `/id`, voir plus haut)
       **après** que l'éditeur est pleinement chargé. Ce message n'apparaît que si la
       capture du contexte a réussi ET que le raccourci a pu être posé — son absence,
       seule, est un signal valide d'échec, pas un faux négatif à ignorer.
 - [ ] **Vérifier d'abord QUEL build s'exécute.** La ligne d'injection le nomme :
-      `[cadastre-id] injecté — /id (iframe) · build 202609241738`. Ce nombre doit
+      `[sb-osm] injecté — /id (iframe) · build 202609241738`. Ce nombre doit
       correspondre au `@version` du script installé dans le gestionnaire
       (`0.1.0.<build>`). Une session entière a été passée à analyser une pile
       d'appels qui venait de la version précédente, restée installée : ce point
       passe avant tous les autres.
 - [ ] **Le greffon n'a aucune interface** : rien n'apparaît à l'écran tant que `Ctrl`
       n'est pas maintenu. Son seul signe de vie au repos est la ligne
-      `[cadastre-id] prêt — maintenir Ctrl…` en console.
+      `[sb-osm] prêt — maintenir Ctrl…` en console.
 - [ ] Aucune erreur inattendue en console, en particulier aucune `TypeError` évoquant
       `coreContext` ou l'amorçage d'iD (voir l'avertissement ci-dessus).
 - [ ] **Raccourci Ctrl**, seul déclencheur du greffon.
@@ -88,7 +88,7 @@ nouvel onglet, sans passer par la carte.
 - [ ] **Fusion de deux bâtiments** (opération DESTRUCTRICE : elle supprime une voie
       existante — à vérifier avant de s'en servir pour de bon).
       - Sélectionner deux bâtiments mitoyens, clic droit : l'entrée « Fusionner
-        (cadastre-id) » doit apparaître dans le menu d'iD, à l'allure des autres. Si
+        (slightly better osm org) » doit apparaître dans le menu d'iD, à l'allure des autres. Si
         la console porte `menu contextuel d'iD introuvable`, iD a renommé ses classes :
         elle nomme alors ce qu'elle a vu à la place, et `onEditMenu`
         (src/bridge/capture.ts) est à remettre à jour. `Alt+F` doit fonctionner dans
@@ -119,7 +119,7 @@ aucune ne remplace l'autre :
   d'entrée dans l'éditeur, pas spécifiquement à cause d'une navigation interne.
 
 - [ ] Le script s'injecte tout de même : mêmes vérifications que le scénario 1
-      (`[cadastre-id] prêt — maintenir Ctrl…`, pas d'erreur), effectuées après être
+      (`[sb-osm] prêt — maintenir Ctrl…`, pas d'erreur), effectuées après être
       entré dans l'éditeur par ce chemin.
 - [ ] Le comportement est identique à celui obtenu par chargement direct — aucune
       primitive manquante, aucun message d'auto-test qui apparaîtrait dans un
@@ -176,7 +176,7 @@ supplémentaire, voir plus bas).
       explicite apparaît (boîte de dialogue du navigateur).
 - [ ] Si un échec de capture du contexte iD se produit réellement pendant l'un des
       deux scénarios ci-dessus (`Ctrl` n'arme rien malgré un scénario par ailleurs
-      normal, ou message `[cadastre-id] désactivé : ...` en console) — ne pas le
+      normal, ou message `[sb-osm] désactivé : ...` en console) — ne pas le
       traiter comme un test raté à recommencer, mais comme le signal qu'il faut
       suivre : le raccourci doit être inerte (jamais armé mais inopérant), et le
       message en console doit

@@ -55,19 +55,19 @@ await build({
   bundle: true,
   format: 'iife',
   target: 'es2022',
-  outfile: 'dist/cadastre-id.user.js',
+  outfile: 'dist/slightly-better-osm-org.user.js',
   banner: { js: bannerVersionne },
   define: { __BUILD__: JSON.stringify(stamp) },
   legalComments: 'none',
 });
 
-const out = readFileSync('dist/cadastre-id.user.js', 'utf8');
+const out = readFileSync('dist/slightly-better-osm-org.user.js', 'utf8');
 if (!out.startsWith(BANNER_START)) {
   throw new Error(
-    `esbuild.config.mjs : dist/cadastre-id.user.js ne commence pas par le bandeau ${JSON.stringify(
+    `esbuild.config.mjs : dist/slightly-better-osm-org.user.js ne commence pas par le bandeau ${JSON.stringify(
       BANNER_START
     )} attendu. La construction a produit un artefact invalide.`
   );
 }
 
-console.log('dist/cadastre-id.user.js écrit');
+console.log('dist/slightly-better-osm-org.user.js écrit');

@@ -10,7 +10,7 @@ import { createOverlay } from './ui/overlay';
 import { BUILD } from './meta';
 import type { LonLat } from './geometry/types';
 
-const log = (...a: unknown[]) => console.log('[cadastre-id]', ...a);
+const log = (...a: unknown[]) => console.log('[sb-osm]', ...a);
 
 // Tout premier acte du script, avant le moindre `await` — voir le spike du
 // 2026-09-23 (spike/probe.user.js), qui journalisait son injection en tout premier
@@ -42,13 +42,13 @@ void (async () => {
       // ci-dessus — silence total et « je tourne, je me tais volontairement »
       // doivent rester distinguables en console.
       console.log(
-        "[cadastre-id] inactif : ce document ne porte pas la marque de l'éditeur iD " +
+        "[sb-osm] inactif : ce document ne porte pas la marque de l'éditeur iD " +
         "(#id-container absent) ; rien à faire ici, l'éditeur vit dans l'autre cadre.",
       );
       return;
     }
     console.warn(
-      `[cadastre-id] désactivé : le contexte iD n'a jamais été capturé (${CAPTURE_TIMEOUT_MS / 1000} s ` +
+      `[sb-osm] désactivé : le contexte iD n'a jamais été capturé (${CAPTURE_TIMEOUT_MS / 1000} s ` +
       `écoulées) ; le greffon reste inactif, l'éditeur n'est pas affecté. ${DISABLE_HINT}`,
     );
     return;
@@ -58,7 +58,7 @@ void (async () => {
   try {
     bridge = makeBridge(capture.context);
   } catch (err) {
-    console.warn('[cadastre-id] désactivé :', (err as Error).message, `— ${DISABLE_HINT}`);
+    console.warn('[sb-osm] désactivé :', (err as Error).message, `— ${DISABLE_HINT}`);
     return;
   }
 
@@ -75,7 +75,7 @@ void (async () => {
   const surfaceReady = await bridge.whenSurfaceReady();
   if (!surfaceReady) {
     console.warn(
-      "[cadastre-id] désactivé : la surface de carte n'est jamais apparue dans le conteneur " +
+      "[sb-osm] désactivé : la surface de carte n'est jamais apparue dans le conteneur " +
       `d'iD (${SURFACE_READY_TIMEOUT_MS / 1000} s écoulées) ; le greffon reste inactif, ` +
       `l'éditeur n'est pas affecté. ${DISABLE_HINT}`,
     );
@@ -188,7 +188,7 @@ void (async () => {
   // interface muette qui a l'air de fonctionner.
   if (bridge.cadastreVisible() === null) {
     console.warn(
-      "[cadastre-id] désactivé : impossible de lire la couche de fond affichée " +
+      "[sb-osm] désactivé : impossible de lire la couche de fond affichée " +
       "(context.background() absent ou de forme inattendue). Le raccourci Ctrl est le " +
       `seul déclencheur du greffon et ne peut pas s'armer sans elle. ${DISABLE_HINT}`,
     );

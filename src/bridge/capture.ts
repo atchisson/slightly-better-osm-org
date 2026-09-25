@@ -263,7 +263,7 @@ export function captureContext(): Promise<unknown> {
           try {
             if (hasFrozenCoreContext(value)) {
               console.log(
-                "[cadastre-id] désactivé : coreContext est une propriété figée (non " +
+                "[sb-osm] désactivé : coreContext est une propriété figée (non " +
                 "configurable, non inscriptible) ; l'éditeur démarre normalement sans " +
                 `le greffon. ${DISABLE_HINT}`,
               );
@@ -347,7 +347,7 @@ function buildBridge(c: any): IdBridge {
   // Suffixe propre à CET appel de buildBridge (voir bridgeInstanceCounter plus haut) :
   // deux bridges construits sur le même contexte (retry, re-init...) ne doivent jamais
   // se marcher dessus sur un espace de nom d3/iD.
-  const ns = `cadastre-id-${++bridgeInstanceCounter}`;
+  const ns = `sb-osm-${++bridgeInstanceCounter}`;
 
   // Cache des bâtiments existants de la vue courante.
   //
@@ -419,7 +419,7 @@ function buildBridge(c: any): IdBridge {
     c.map().on(`move.${ns}-cache`, () => { buildingCache = null; });
   } catch {
     console.log(
-      "[cadastre-id] aucun signal de deplacement de carte verifie sur map() : " +
+      "[sb-osm] aucun signal de deplacement de carte verifie sur map() : " +
       "le cache des batiments existants ne s'invalide plus qu'apres nos propres modifications.",
     );
   }
@@ -436,7 +436,7 @@ function buildBridge(c: any): IdBridge {
     c.history().on(`change.${ns}-cache`, () => { buildingCache = null; });
   } catch {
     console.log(
-      "[cadastre-id] aucun signal de changement du graphe verifie sur history() : " +
+      "[sb-osm] aucun signal de changement du graphe verifie sur history() : " +
       "le cache des batiments existants ne s'invalide qu'au deplacement de carte.",
     );
   }
@@ -467,7 +467,7 @@ function buildBridge(c: any): IdBridge {
         c.map().on(`move.${subNs}`, cb);
       } catch {
         console.log(
-          "[cadastre-id] aucun signal de deplacement de carte verifie sur map() : " +
+          "[sb-osm] aucun signal de deplacement de carte verifie sur map() : " +
           "onMapMove n'appellera jamais son callback.",
         );
         return () => {};
@@ -646,7 +646,7 @@ function buildBridge(c: any): IdBridge {
       // sera décalé, et il faut pouvoir le lire en console plutôt que le deviner à
       // l'écran.
       console.log(
-        "[cadastre-id] surface de carte (svg.surface) introuvable dans le conteneur d'iD : " +
+        "[sb-osm] surface de carte (svg.surface) introuvable dans le conteneur d'iD : " +
         "repli sur le conteneur lui-meme. L'origine de la projection est probablement " +
         "decalee (barre d'outils, panneau lateral) ; le calque de survol et la " +
         "conversion ecran -> coordonnees peuvent ne plus coincider avec la carte.",
@@ -727,7 +727,7 @@ function buildBridge(c: any): IdBridge {
 
     moveNode(nodeId: string, loc: LonLat): void {
       const deplacer = (graph: any) => graph.replace(graph.entity(nodeId).move(loc));
-      c.perform(deplacer, 'Déplacement d’un nœud (cadastre-id)');
+      c.perform(deplacer, 'Déplacement d’un nœud (slightly better osm org)');
       buildingCache = null;
     },
 
@@ -736,7 +736,7 @@ function buildBridge(c: any): IdBridge {
       const node = instancier(iD.osmNode, { loc });
       c.perform(
         instancier(iD.actionAddMidpoint, { loc, edge }, node),
-        'Ajout d’un nœud (cadastre-id)',
+        'Ajout d’un nœud (slightly better osm org)',
       );
       buildingCache = null;
     },
@@ -769,7 +769,7 @@ function buildBridge(c: any): IdBridge {
       c.perform(
         remplacerGeometrie,
         instancier(iD.actionDeleteWay, plan.dropId),
-        'Fusion de deux bâtiments (cadastre-id)',
+        'Fusion de deux bâtiments (slightly better osm org)',
       );
       buildingCache = null;
       c.enter(instancier(iD.modeSelect, c, [plan.keepId]));
@@ -784,12 +784,12 @@ function buildBridge(c: any): IdBridge {
         const menu = container.querySelector('.edit-menu');
         if (!menu) return;
         // Un seul greffage par ouverture : iD reconstruit son menu à chaque fois.
-        if (menu.hasAttribute('data-cadastre-id')) return;
+        if (menu.hasAttribute('data-sb-osm')) return;
         const modele = menu.querySelector('.edit-menu-item');
         if (!modele) return;
-        menu.setAttribute('data-cadastre-id', '1');
+        menu.setAttribute('data-sb-osm', '1');
         try { cb({ menu, modele }); } catch (err) {
-          console.warn('[cadastre-id] impossible de greffer l’entrée de menu :', err);
+          console.warn('[sb-osm] impossible de greffer l’entrée de menu :', err);
         }
       });
       observer.observe(container, { childList: true, subtree: true });
@@ -806,7 +806,7 @@ function buildBridge(c: any): IdBridge {
             .map(el => el.tagName.toLowerCase() + '.' + el.className)
             .slice(0, 8);
           console.log(
-            "[cadastre-id] menu contextuel d'iD introuvable (.edit-menu) : la fusion " +
+            "[sb-osm] menu contextuel d'iD introuvable (.edit-menu) : la fusion " +
             'de deux bâtiments restera accessible au clavier. Éléments « menu » vus : ' +
             (candidats.join(' | ') || 'aucun'),
           );

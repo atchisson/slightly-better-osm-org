@@ -101,13 +101,13 @@ describe('overlay', () => {
 
   // Revue de la tâche 15 : un garde sur « l'état a-t-il changé depuis le dernier show()
   // ? » laissait le tout premier show('ok') d'une session sans le suffixe de classe
-  // cadastre-id-ok (la classe restait au défaut posé à la construction), ce suffixe
+  // sb-osm-ok (la classe restait au défaut posé à la construction), ce suffixe
   // n'apparaissant qu'après être passé par 'refus' au moins une fois. Ce test porte
   // spécifiquement sur le TOUT PREMIER appel, sans show('refus') préalable.
   it('porte la classe d’état dès le tout premier show(), sans refus préalable', () => {
     const o = createOverlay(fauxBridge(container));
     o.show(carre, 'ok');
-    expect(container.querySelector('path')!.getAttribute('class')).toContain('cadastre-id-ok');
+    expect(container.querySelector('path')!.getAttribute('class')).toContain('sb-osm-ok');
   });
 
   it('efface le contour', () => {
@@ -197,7 +197,7 @@ describe('overlay — origine de la projection', () => {
 
     createOverlay(bridge);
 
-    const svg = conteneur.querySelector('svg.cadastre-id-overlay');
+    const svg = conteneur.querySelector('svg.sb-osm-overlay');
     expect(svg).not.toBeNull();
     expect(surface.contains(svg!)).toBe(true);
   });

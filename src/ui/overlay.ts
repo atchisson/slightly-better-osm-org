@@ -46,12 +46,12 @@ export interface Overlay {
 
 export function createOverlay(bridge: IdBridge): Overlay {
   const svg = document.createElementNS(NS, 'svg');
-  svg.setAttribute('class', 'cadastre-id-overlay');
+  svg.setAttribute('class', 'sb-osm-overlay');
   svg.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:50';
 
   const path = document.createElementNS(NS, 'path');
   path.setAttribute('d', '');
-  path.setAttribute('class', 'cadastre-id-preview');
+  path.setAttribute('class', 'sb-osm-preview');
   path.setAttribute('fill', 'rgba(64,160,255,0.25)');
   path.setAttribute('stroke', '#2e7dd7');
   path.setAttribute('stroke-width', '2');
@@ -123,10 +123,10 @@ export function createOverlay(bridge: IdBridge): Overlay {
     show(ring, state) {
       current = ring;
       // Appliqué sans condition sur un changement d'état : un premier `show('ok')` de
-      // session doit porter la classe `cadastre-id-ok` au même titre qu'un `show('ok')`
+      // session doit porter la classe `sb-osm-ok` au même titre qu'un `show('ok')`
       // qui suit un `show('refus')` — revue de la tâche 15, un garde sur l'état
       // précédent laissait le tout premier appel sans le suffixe d'état.
-      path.setAttribute('class', `cadastre-id-preview cadastre-id-${state}`);
+      path.setAttribute('class', `sb-osm-preview sb-osm-${state}`);
       path.setAttribute('fill', state === 'ok' ? 'rgba(64,160,255,0.25)' : 'rgba(224,80,80,0.25)');
       path.setAttribute('stroke', state === 'ok' ? '#2e7dd7' : '#c23b3b');
       draw();
