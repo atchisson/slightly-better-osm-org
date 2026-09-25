@@ -92,16 +92,20 @@ export function createImproveMode(hooks: ImproveHooks): ImproveMode {
     if (!c) { oublier(); return; }
     courante = c;
 
+    const destination = hooks.invert(ecran);
     // Le tracé résultant, pas seulement la marque : à dix mètres de distance, une
     // marque posée sur le sommet de départ ne dit plus rien de la forme obtenue.
-    hooks.showPreview(anneauApres(voie, c, hooks.invert(ecran)));
+    hooks.showPreview(anneauApres(voie, c, destination));
     // Sur une route, les jonctions sont partout : déplacer un nœud de jonction
     // déplace la jonction pour toutes les voies qui s'y rejoignent. C'est souvent ce
     // qu'on veut, mais ça doit se voir AVANT le clic. `null` (indéterminable) est
     // traité comme « non partagé » pour l'affichage : on ne crie pas au loup sans
     // savoir, et aucune action n'en dépend.
     const partage = c.kind === 'noeud' && hooks.nodeIsShared(c.nodeId) === true;
-    hooks.showTarget(c.loc, c.kind, partage);
+    // Sur un sommet, la marque reste sur le sommet À DÉPLACER — c'est elle qui dit
+    // lequel bouge, le tracé d'aperçu disant où. Sur un segment, elle se pose au
+    // curseur : c'est là que le nœud va naître.
+    hooks.showTarget(c.kind === 'noeud' ? c.loc : destination, c.kind, partage);
   };
 
   return {
@@ -122,8 +126,10 @@ export function createImproveMode(hooks: ImproveHooks): ImproveMode {
 
       // Le nœud va SOUS LE CURSEUR, pas sur la cible affichée : celle-ci marque le
       // sommet à déplacer, pas sa destination.
-      if (c.kind === 'noeud') hooks.moveNode(c.nodeId, hooks.invert(ecran));
-      else hooks.insertNodeOnEdge(c.edge, c.loc);
+      // Les deux gestes visent le curseur : le sommet y va, le nœud y naît.
+      const destination = hooks.invert(ecran);
+      if (c.kind === 'noeud') hooks.moveNode(c.nodeId, destination);
+      else hooks.insertNodeOnEdge(c.edge, destination);
 
       oublier();
       return true;

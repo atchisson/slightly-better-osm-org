@@ -72,19 +72,22 @@ describe('cibleSous — insérer', () => {
     expect(c?.kind).toBe('segment');
   });
 
-  it('place le point d’insertion EXACTEMENT sur le segment', () => {
-    const c = cibleSous([30, 50], ligne, project, 'inserer');
+  it('choisit le segment par la distance du curseur à la DROITE, pas aux sommets', () => {
+    // Curseur très au-dessus du milieu du second segment : c'est bien lui qui gagne,
+    // alors que le sommet n1 est plus proche en distance pure.
+    const c = cibleSous([150, 300], ligne, project, 'inserer');
 
     if (c?.kind !== 'segment') return;
-    expect(c.loc[1]).toBeCloseTo(0, 12);
-    expect(c.loc[0]).toBeCloseTo(0.03, 12);
+    expect(c.edge).toEqual(['n2', 'n3']);
   });
 
-  it('borne le point d’insertion aux extrémités du segment', () => {
+  it('borne la projection aux extrémités, pour ne pas préférer un segment lointain', () => {
+    // Bien à gauche de la ligne : la projection sort du premier segment et doit être
+    // ramenée sur lui, sinon la distance calculée serait celle d'une droite infinie.
     const c = cibleSous([-500, 3], ligne, project, 'inserer');
 
     if (c?.kind !== 'segment') return;
-    expect(c.loc[0]).toBeCloseTo(0, 12);
+    expect(c.edge).toEqual(['n1', 'n2']);
   });
 });
 
@@ -113,15 +116,15 @@ describe('anneauApres', () => {
     expect(apres[apres.length - 1]).toEqual([0.05, 0.05]);
   });
 
-  it('insère le nouveau sommet à sa place dans l’anneau', () => {
+  it('insère le nouveau sommet AU CURSEUR, entre les deux bons voisins', () => {
+    // Une version précédente le contraignait sur le segment, au motif qu'il
+    // « déformerait la voie » ailleurs. Or déformer la voie est le but : on ajoute un
+    // nœud pour faire suivre au tracé la route réelle.
     const c = cibleSous([150, 5], ligne, project, 'inserer')!;
 
-    const apres = anneauApres(ligne, c, [9, 9]);
+    const apres = anneauApres(ligne, c, [0.15, 0.05]);
 
-    expect(apres).toHaveLength(4);
-    // Entre n2 et n3, et sur le segment — la destination du curseur est ignorée.
-    expect(apres[2]![1]).toBeCloseTo(0, 12);
-    expect(apres[2]![0]).toBeCloseTo(0.15, 12);
+    expect(apres).toEqual([[0, 0], [0.1, 0], [0.15, 0.05], [0.2, 0]]);
   });
 
   it('ne modifie pas l’anneau d’origine', () => {

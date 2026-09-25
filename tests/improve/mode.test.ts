@@ -147,9 +147,10 @@ describe('createImproveMode', () => {
 
     expect(inseres).toHaveLength(1);
     expect(inseres[0]!.edge).toEqual(['nA', 'nB']);
-    // Le nœud inséré tombe SUR l'arête, pas sous le curseur : ailleurs, il
-    // déformerait la voie au lieu de la préciser.
-    expect(inseres[0]!.loc[1]).toBeCloseTo(0, 12);
+    // Le nœud naît SOUS LE CURSEUR, pas sur l'arête : on l'ajoute précisément pour
+    // faire suivre au tracé la route réelle.
+    expect(inseres[0]!.loc[0]).toBeCloseTo(0.05, 12);
+    expect(inseres[0]!.loc[1]).toBeCloseTo(-0.002, 12);
     expect(deplaces).toEqual([]);
   });
 

@@ -23,8 +23,6 @@ export type Cible =
       index: number;
       /** les deux nœuds qui bornent le segment, pour désigner l'arête à couper */
       edge: [string, string];
-      /** point du segment le plus proche du curseur — là où un nœud serait inséré */
-      loc: LonLat;
       distancePx: number;
     };
 
@@ -92,17 +90,7 @@ export function cibleSous(
     const d = Math.hypot(ecran[0] - (a[0] + t * dx), ecran[1] - (a[1] + t * dy));
     if (meilleur !== null && d >= meilleur.distancePx) continue;
 
-    const ga = ring[i]!, gb = ring[i + 1]!;
-    meilleur = {
-      kind: 'segment',
-      index: i,
-      edge: [nodeIds[i]!, nodeIds[i + 1]!],
-      // Le point d'insertion est calculé en coordonnées ÉCRAN puis reporté en
-      // coordonnées géographiques par la même proportion : il tombe ainsi exactement
-      // sur le segment, ce qu'exige l'insertion d'un nœud dans une arête.
-      loc: [ga[0] + t * (gb[0] - ga[0]), ga[1] + t * (gb[1] - ga[1])],
-      distancePx: d,
-    };
+    meilleur = { kind: 'segment', index: i, edge: [nodeIds[i]!, nodeIds[i + 1]!], distancePx: d };
   }
   return meilleur;
 }
@@ -114,14 +102,19 @@ export function cibleSous(
  * une marque posée sur le sommet de départ ne dit plus rien de la forme obtenue. JOSM
  * montre de même « dashed red line - indicates a way after moved node ».
  *
- * @param destination position du curseur, en coordonnées géographiques ; ignorée pour
- *                    une insertion, dont le point est déjà contraint sur l'arête.
+ * @param destination position du curseur, en coordonnées géographiques. Elle sert
+ *                    aux DEUX gestes : un sommet déplacé y va, et un nœud inséré y
+ *                    naît. Une version précédente contraignait le nœud inséré à
+ *                    tomber sur le segment, au motif qu'il « déformerait la voie »
+ *                    ailleurs — or déformer la voie est le but même du geste : on
+ *                    ajoute un nœud pour faire suivre au tracé la route réelle. JOSM
+ *                    place de même le nœud au curseur.
  */
 export function anneauApres(voie: VoieVisee, cible: Cible, destination: LonLat): Ring {
   const ring = [...voie.ring];
 
   if (cible.kind === 'segment') {
-    ring.splice(cible.index + 1, 0, cible.loc);
+    ring.splice(cible.index + 1, 0, destination);
     return ring;
   }
 

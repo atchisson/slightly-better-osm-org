@@ -165,20 +165,40 @@ void (async () => {
     mode.hoverEnd();
   });
 
-  surface.addEventListener('click', (e) => {
-    const ev = e as MouseEvent;
-    // La visée passe avant : les deux modes s'excluent par la couche affichée, mais
-    // l'ordre reste explicite plutôt que dépendant de cette exclusion.
-    if (improve.isEnabled() && improve.clickAt(ecranRelatif(ev), intentionDe(ev))) {
-      // iD traiterait le même clic comme une sélection et désélectionnerait la voie
-      // qu'on est en train de préciser.
-      ev.preventDefault();
-      ev.stopPropagation();
-      return;
-    }
-    if (!mode.isEnabled()) return;
-    void mode.clickAt(toLonLat(ev));
+  // La correction de tracé agit au POINTERDOWN, pas au clic.
+  //
+  // iD change la sélection dès l'enfoncement du bouton : au moment où un écouteur de
+  // `click` s'exécute, la voie visée est déjà désélectionnée, `selectedWays()` rend
+  // une liste vide, et il ne se passe rien. Constaté en session — l'aperçu marchait,
+  // puisqu'il vit au survol, mais le clic restait sans effet.
+  //
+  // `preventDefault()` sur `pointerdown` supprime normalement les événements souris
+  // de compatibilité qui suivent. « Normalement » ne suffit pas ici : on retient
+  // explicitement le `mousedown` et le `click` qui pourraient malgré tout arriver,
+  // sans quoi iD désélectionnerait la voie juste après qu'on l'a corrigée.
+  let traite = false;
+  surface.addEventListener('pointerdown', (e) => {
+    const ev = e as PointerEvent;
+    if (!improve.isEnabled()) return;
+    if (!improve.clickAt(ecranRelatif(ev), intentionDe(ev))) return;
+    traite = true;
+    ev.preventDefault();
+    ev.stopPropagation();
   }, true);
+
+  for (const type of ['mousedown', 'click'] as const) {
+    surface.addEventListener(type, (e) => {
+      if (!traite) return;
+      if (type === 'click') traite = false;
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+  }
+
+  surface.addEventListener('click', (e) => {
+    if (traite || !mode.isEnabled()) return;
+    void mode.clickAt(toLonLat(e as MouseEvent));
+  });
 
   // Le raccourci Ctrl est le SEUL déclencheur du greffon : il n'y a pas de bouton.
   // Maintenir Ctrl arme le mode le temps de l'appui, et seulement quand une couche

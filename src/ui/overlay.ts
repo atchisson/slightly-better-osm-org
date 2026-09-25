@@ -105,13 +105,20 @@ export function createOverlay(bridge: IdBridge): Overlay {
   const draw = (): void => {
     drawTarget();
     if (!current) { path.setAttribute('d', ''); return; }
+    // Une voie OUVERTE — une route, un chemin — ne se ferme pas et ne se remplit pas :
+    // la refermer dessinait un polygone bleu qui n'a aucun sens sur une ligne. On lit
+    // la fermeture dans l'anneau lui-même plutôt que de la faire déclarer : un
+    // contour cadastral répète toujours son premier sommet, une route jamais.
+    const a = current[0]!, z = current[current.length - 1]!;
+    const ferme = current.length > 2 && a[0] === z[0] && a[1] === z[1];
     const d = current
       .map((p, i) => {
         const [x, y] = bridge.project(p);
         return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
       })
-      .join(' ') + ' Z';
+      .join(' ') + (ferme ? ' Z' : '');
     path.setAttribute('d', d);
+    if (!ferme) path.setAttribute('fill', 'none');
   };
 
   // bridge.onMapMove renvoie un désabonnement : destroy() DOIT l'appeler, sinon un
