@@ -9,15 +9,24 @@ export interface MergeMenuHooks {
 
 export const LIBELLE = 'Fusionner (cadastre-id)';
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
 /**
- * Icône empruntée à l'opération « Combiner » d'iD.
+ * Contour en L : deux rectangles dont le mur commun a disparu.
  *
- * Toutes ses opérations suivent la convention `#iD-operation-{id}` et `merge` en est
- * une : l'icône existe donc dans sa feuille de symboles. C'est aussi la plus juste
- * sémantiquement — notre fusion fait ce que « Combiner » ferait si iD savait produire
- * une voie unique au lieu d'un multipolygone.
+ * **Dessinée ici, et non empruntée à iD.** Le premier jet reprenait
+ * `#iD-operation-merge`, l'icône de « Combiner » — trompeur, puisque cette opération
+ * produit une relation multipolygone là où la nôtre produit une voie unique. Deux
+ * gestes différents ne doivent pas porter le même signe.
+ *
+ * La dessiner plutôt que d'emprunter un autre identifiant de sa feuille de symboles
+ * supprime aussi une dépendance jamais vérifiée : un identifiant absent afficherait
+ * un bouton muet, sans rien dire.
+ *
+ * Le tracé dit exactement ce que l'opération fait : un seul contour, avec le décroché
+ * que laissent deux bâtiments réunis.
  */
-const ICONE = '#iD-operation-merge';
+const TRACE_ICONE = 'M4 5 h8 v7 h8 v7 H4 Z';
 
 const REFUS: Record<string, string> = {
   'pas-deux': 'Sélectionnez exactement deux bâtiments pour les fusionner.',
@@ -78,15 +87,23 @@ export function attachMergeMenu(bridge: IdBridge, hooks: MergeMenuHooks): () => 
     // Un voisin désactivé au moment du clonage nous transmettrait son état.
     item.classList.remove('disabled');
 
-    // On ne garde que l'icône du modèle, dont on change la cible. Vider puis remettre
-    // supprime au passage tout libellé que le voisin porterait.
+    // On garde l'ENVELOPPE svg du modèle — ses classes portent la taille et la
+    // couleur que le menu d'iD applique à ses icônes — et on remplace son contenu par
+    // notre tracé. Vider puis remettre supprime au passage tout libellé que le voisin
+    // porterait.
     const icone = item.querySelector('svg');
     item.textContent = '';
     if (icone) {
-      for (const use of icone.querySelectorAll('use')) {
-        use.setAttribute('href', ICONE);
-        use.setAttribute('xlink:href', ICONE);
-      }
+      icone.textContent = '';
+      icone.setAttribute('viewBox', '0 0 24 24');
+      const trace = document.createElementNS(SVG_NS, 'path');
+      trace.setAttribute('d', TRACE_ICONE);
+      // En style EN LIGNE, pas en attributs : les règles CSS d'iD sur ses icônes
+      // (`fill: currentColor`) l'emporteraient sur de simples attributs de présentation
+      // et rempliraient le contour.
+      trace.setAttribute('style',
+        'fill:none;stroke:currentColor;stroke-width:2;stroke-linejoin:round');
+      icone.appendChild(trace);
       item.appendChild(icone);
     }
     item.title = LIBELLE;

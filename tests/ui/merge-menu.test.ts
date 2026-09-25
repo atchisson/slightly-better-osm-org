@@ -124,8 +124,26 @@ describe('attachMergeMenu', () => {
     expect(ajoute.textContent?.trim()).toBe('');
     expect(ajoute.title).toBe(LIBELLE);
     expect(ajoute.getAttribute('aria-label')).toBe(LIBELLE);
-    const use = ajoute.querySelector('use');
-    expect(use?.getAttribute('href')).toBe('#iD-operation-merge');
+  });
+
+  it('dessine son icône au lieu d’emprunter celle d’une autre opération', () => {
+    // Reprendre `#iD-operation-merge` laissait croire que l'opération est celle
+    // d'iD — or « Combiner » produit une relation multipolygone, la nôtre une voie
+    // unique. Deux gestes différents ne portent pas le même signe. Dessiner supprime
+    // au passage une dépendance à la feuille de symboles d'iD, jamais vérifiée : un
+    // identifiant absent afficherait un bouton muet, sans rien dire.
+    selection = [gauche, droite];
+    attachMergeMenu(fauxBridge(), { notify: () => {} });
+
+    const ajoute = ouvrirMenu().lastElementChild as HTMLElement;
+
+    expect(ajoute.querySelectorAll('use')).toHaveLength(0);
+    const trace = ajoute.querySelector('path');
+    expect(trace).not.toBeNull();
+    // Le style est en ligne : les règles d'iD sur ses icônes rempliraient sinon le
+    // contour, qui doit rester un contour.
+    expect(trace?.getAttribute('style')).toMatch(/fill:\s*none/);
+    expect(trace?.getAttribute('style')).toMatch(/stroke:\s*currentColor/);
   });
 
   it('n’hérite pas d’un voisin désactivé', () => {
