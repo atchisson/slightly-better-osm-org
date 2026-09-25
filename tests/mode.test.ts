@@ -63,6 +63,9 @@ describe('mode cadastre', () => {
       whenSurfaceReady: () => Promise.resolve(true),
       surfaceNode: () => container,
       cadastreVisible: () => true,
+      selectedBuildings: () => [],
+      mergeBuildings: () => {},
+      onEditMenu: () => () => {},
     };
   });
 
@@ -877,6 +880,9 @@ describe('mode cadastre — commune introuvable vs réseau (defaultLoadDataset)'
       whenSurfaceReady: () => Promise.resolve(true),
       surfaceNode: () => container,
       cadastreVisible: () => true,
+      selectedBuildings: () => [],
+      mergeBuildings: () => {},
+      onEditMenu: () => () => {},
     };
   });
 
@@ -958,6 +964,9 @@ describe('mode cadastre — réutilisation des nœuds sur un bâtiment de taille
       whenSurfaceReady: () => Promise.resolve(true),
       surfaceNode: () => container,
       cadastreVisible: () => true,
+      selectedBuildings: () => [],
+      mergeBuildings: () => {},
+      onEditMenu: () => () => {},
     };
 
     const mode = createMode(bridge, {

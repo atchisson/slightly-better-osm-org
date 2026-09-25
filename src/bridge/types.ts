@@ -1,5 +1,6 @@
 import type { ExistingBuilding } from '../conflation/overlap';
 import type { ExistingNode, Insertion } from '../conflation/snap';
+import type { MergePlan, OsmBuilding } from '../merge';
 import type { LonLat, Ring } from '../geometry/types';
 
 /**
@@ -104,4 +105,31 @@ export interface IdBridge {
    * un contexte vérifié, faute de quoi le raccourci reste désactivé (et le dit).
    */
   cadastreVisible(): boolean | null;
+  /**
+   * Les bâtiments actuellement sélectionnés dans iD, avec leurs nœuds et leurs tags.
+   *
+   * Rend un tableau vide si la sélection n'est pas lisible ou ne contient pas que des
+   * voies fermées taguées `building` — l'appelant n'a alors rien à proposer.
+   */
+  selectedBuildings(): OsmBuilding[];
+  /**
+   * Applique une fusion : la voie conservée reçoit la géométrie et les tags unis, la
+   * seconde est supprimée.
+   *
+   * **Opération destructrice** — elle supprime une voie existante. Une seule
+   * transaction, donc un seul `Ctrl+Z`. Le nettoyage des nœuds devenus inutiles est
+   * laissé à `actionDeleteWay` d'iD, qui sait lesquels sont encore utilisés ailleurs.
+   */
+  mergeBuildings(plan: Extract<MergePlan, { ok: true }>): void;
+  /**
+   * Appelle `cb` chaque fois que le menu contextuel d'iD s'ouvre, en lui donnant le
+   * menu et un de ses éléments à imiter.
+   *
+   * Même parti pris que pour la barre d'outils : on ne rend pas des noms de classes
+   * mais des ÉLÉMENTS À CLONER, de sorte qu'aucun sélecteur interne d'iD ne sorte de
+   * `src/bridge/` (§4 de la spec) et que l'entrée ajoutée ait exactement l'allure des
+   * autres. Si le menu n'a pas la forme attendue, `cb` n'est jamais appelé et la
+   * console dit ce qui a été trouvé à la place.
+   */
+  onEditMenu(cb: (slot: { menu: Element; modele: Element }) => void): () => void;
 }

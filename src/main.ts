@@ -4,6 +4,7 @@ import {
 } from './bridge/capture';
 import { createMode } from './mode';
 import { createCtrlShortcut } from './ui/shortcut';
+import { attachMergeMenu, fusionnerSelection } from './ui/merge-menu';
 import { BUILD } from './meta';
 import type { LonLat } from './geometry/types';
 
@@ -152,7 +153,22 @@ void (async () => {
     setArmed: on => (on ? mode.enable() : mode.disable()),
   });
 
+  // Fusion de deux bâtiments sélectionnés — un bâtiment à cheval sur deux parcelles
+  // est découpé en deux par le cadastre alors que c'est un seul bâtiment. Deux
+  // chemins, une seule logique : l'entrée de menu contextuel, greffée sur le menu
+  // d'iD quand il a la forme attendue, et un raccourci clavier qui, lui, ne dépend
+  // d'aucun interne d'iD. Le raccourci n'est pas un pis-aller : c'est la garantie que
+  // la fonction reste atteignable si iD renomme ses classes.
+  attachMergeMenu(bridge, { notify: m => window.alert(m) });
+  document.addEventListener('keydown', (e) => {
+    if (!e.altKey || e.ctrlKey || e.metaKey || e.key.toLowerCase() !== 'f') return;
+    if (bridge.selectedBuildings().length !== 2) return;   // pas pour nous
+    e.preventDefault();
+    const message = fusionnerSelection(bridge);
+    if (message) window.alert(message);
+  });
+
   // Sans bouton, cette ligne est la seule chose qui dise comment déclencher le
   // greffon. Elle nomme donc le geste, pas seulement son état.
-  log('prêt — maintenir Ctrl sur la carte (couche cadastre affichée) pour armer');
+  log('prêt — maintenir Ctrl sur la carte (couche cadastre affichée) pour armer ; deux bâtiments sélectionnés : clic droit « Fusionner », ou Alt+F');
 })();

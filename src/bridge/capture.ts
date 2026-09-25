@@ -1,6 +1,7 @@
 import type { IdBridge } from './types';
 import type { ExistingBuilding } from '../conflation/overlap';
 import type { ExistingNode, Insertion } from '../conflation/snap';
+import type { MergePlan, OsmBuilding } from '../merge';
 import type { LonLat, Ring } from '../geometry/types';
 
 // `storage` ne figure PAS ici : il n'existe plus sur le contexte (spike du 2026-09-23).
@@ -645,6 +646,106 @@ function buildBridge(c: any): IdBridge {
         "conversion ecran -> coordonnees peuvent ne plus coincider avec la carte.",
       );
       return container;
+    },
+
+    selectedBuildings(): OsmBuilding[] {
+      // `selectedIDs` n'a pas été vérifié par le spike. Deux formes connues d'iD sont
+      // tentées, puis on renonce proprement : une sélection illisible ne doit jamais
+      // faire échouer quoi que ce soit, seulement priver l'utilisateur de l'option.
+      try {
+        const ctx = c as {
+          selectedIDs?: () => unknown;
+          mode?: () => { selectedIDs?: () => unknown } | undefined;
+        };
+        const bruts = typeof ctx.selectedIDs === 'function'
+          ? ctx.selectedIDs()
+          : ctx.mode?.()?.selectedIDs?.();
+        if (!Array.isArray(bruts)) return [];
+
+        const graph = c.graph();
+        const out: OsmBuilding[] = [];
+        for (const id of bruts as string[]) {
+          const e = graph.entity(id) as {
+            type?: string; nodes?: string[]; tags?: Record<string, string>;
+          };
+          if (e?.type !== 'way' || !Array.isArray(e.nodes)) return [];
+          if (!taggedBuilding(e.tags)) return [];
+          // Voie FERMÉE seulement : fusionner deux lignes ouvertes n'a pas de sens ici,
+          // et `topologicalUnion` suppose des anneaux.
+          if (e.nodes.length < 4 || e.nodes[0] !== e.nodes[e.nodes.length - 1]) return [];
+          out.push({
+            id,
+            ring: e.nodes.map(n => graph.entity(n).loc as LonLat),
+            nodeIds: [...e.nodes],
+            tags: { ...(e.tags ?? {}) },
+          });
+        }
+        return out;
+      } catch {
+        return [];
+      }
+    },
+
+    mergeBuildings(plan: Extract<MergePlan, { ok: true }>): void {
+      const iD = (globalThis as any).iD;
+      // Action maison plutôt qu'une action d'iD : aucune de ses actions ne remplace la
+      // liste de nœuds d'une voie, et `perform` accepte n'importe quelle fonction de
+      // graphe. On évite ainsi de deviner un nom d'action qui n'existe pas.
+      const remplacerGeometrie = (graph: any) => {
+        const way = graph.entity(plan.keepId);
+        return graph.replace(way.update({ nodes: plan.nodeIds, tags: plan.tags }));
+      };
+      // Dans cet ordre : la voie conservée porte déjà les nœuds communs quand la
+      // seconde disparaît, de sorte qu'`actionDeleteWay` ne supprime que les nœuds
+      // réellement devenus inutiles. Une seule transaction : un seul Ctrl+Z.
+      c.perform(
+        remplacerGeometrie,
+        instancier(iD.actionDeleteWay, plan.dropId),
+        'Fusion de deux bâtiments (cadastre-id)',
+      );
+      buildingCache = null;
+      c.enter(instancier(iD.modeSelect, c, [plan.keepId]));
+    },
+
+    onEditMenu(cb: (slot: { menu: Element; modele: Element }) => void): () => void {
+      const container = c.container().node() as HTMLElement;
+      if (typeof MutationObserver === 'undefined' || !container?.querySelector) return () => {};
+
+      let diagnostique = false;
+      const observer = new MutationObserver(() => {
+        const menu = container.querySelector('.edit-menu');
+        if (!menu) return;
+        // Un seul greffage par ouverture : iD reconstruit son menu à chaque fois.
+        if (menu.hasAttribute('data-cadastre-id')) return;
+        const modele = menu.querySelector('.edit-menu-item');
+        if (!modele) return;
+        menu.setAttribute('data-cadastre-id', '1');
+        try { cb({ menu, modele }); } catch (err) {
+          console.warn('[cadastre-id] impossible de greffer l’entrée de menu :', err);
+        }
+      });
+      observer.observe(container, { childList: true, subtree: true });
+
+      // Diagnostic, une seule fois : si le menu ne porte pas les classes attendues,
+      // dire ce qui est apparu plutôt que se taire. Sept allers-retours en navigateur
+      // ont déjà été dépensés sur des noms de classes supposés.
+      container.addEventListener('contextmenu', () => {
+        if (diagnostique) return;
+        setTimeout(() => {
+          if (diagnostique || container.querySelector('.edit-menu')) return;
+          diagnostique = true;
+          const candidats = [...container.querySelectorAll('[class*="menu"]')]
+            .map(el => el.tagName.toLowerCase() + '.' + el.className)
+            .slice(0, 8);
+          console.log(
+            "[cadastre-id] menu contextuel d'iD introuvable (.edit-menu) : la fusion " +
+            'de deux bâtiments restera accessible au clavier. Éléments « menu » vus : ' +
+            (candidats.join(' | ') || 'aucun'),
+          );
+        }, 120);
+      }, true);
+
+      return () => observer.disconnect();
     },
 
     cadastreVisible(): boolean | null {

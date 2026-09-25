@@ -42,6 +42,9 @@ describe('chargement par défaut — le cache ne peut jamais faire échouer le c
       whenSurfaceReady: () => Promise.resolve(true),
       surfaceNode: () => container,
       cadastreVisible: () => true,
+      selectedBuildings: () => [],
+      mergeBuildings: () => {},
+      onEditMenu: () => () => {},
     };
   });
 

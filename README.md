@@ -86,6 +86,21 @@ d'autre que lire et manipuler la page d'édition elle-même.
   s'affiche, le greffon est armé.
 - Cliquer crée le bâtiment dans iD, sélectionné, prêt à recevoir ses tags — comme pour
   tout objet tracé à la main.
+- **Fusionner deux bâtiments.** Un bâtiment à cheval sur deux parcelles est découpé
+  en deux par le cadastre, alors que c'est un seul bâtiment — un seul toit traversé
+  par une limite de propriété. Sélectionnez les deux dans iD, puis **clic droit →
+  « Fusionner (cadastre-id) »**, ou **`Alt+F`**. iD ne sait pas le faire : son
+  opération « Combiner » produit un multipolygone, pas une voie unique.
+
+  La plus grande des deux voies est **conservée** — son identifiant, son historique et
+  ses appartenances à des relations survivent —, la seconde est supprimée, et les
+  nœuds du mur devenu intérieur disparaissent avec elle *sauf* ceux qu'un autre objet
+  utilise encore. Aucun nœud n'est créé ni déplacé. Les tags sont réunis ; si une même
+  clé portait deux valeurs différentes, celle du plus grand est retenue **et la clé
+  vous est nommée**. Un seul `Ctrl+Z` défait l'ensemble.
+
+  Le raccourci clavier n'est pas un pis-aller : l'entrée de menu se greffe sur le menu
+  d'iD, donc elle dépend de la structure interne de l'éditeur. `Alt+F`, non.
 - `Ctrl+Z` annule la création (nœuds éventuellement créés + way) en une seule
   opération.
 - Le commentaire de changeset et la source sont préremplis dans le panneau de

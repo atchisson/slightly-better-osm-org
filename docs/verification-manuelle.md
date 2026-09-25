@@ -76,6 +76,21 @@ nouvel onglet, sans passer par la carte.
         with 'new'` (les entités d'iD sont des classes), ni `map().off is not a
         function` (la carte d'iD est un dispatch d3, sans `off`). Ces deux-là ont été
         constatées en session réelle.
+- [ ] **Fusion de deux bâtiments** (opération DESTRUCTRICE : elle supprime une voie
+      existante — à vérifier avant de s'en servir pour de bon).
+      - Sélectionner deux bâtiments mitoyens, clic droit : l'entrée « Fusionner
+        (cadastre-id) » doit apparaître dans le menu d'iD, à l'allure des autres. Si
+        la console porte `menu contextuel d'iD introuvable`, iD a renommé ses classes :
+        elle nomme alors ce qu'elle a vu à la place, et `onEditMenu`
+        (src/bridge/capture.ts) est à remettre à jour. `Alt+F` doit fonctionner dans
+        tous les cas.
+      - Après fusion : une seule voie, portant l'identifiant du plus GRAND des deux
+        (vérifiable dans le panneau d'historique d'iD), le mur commun disparu, et
+        aucun nœud orphelin laissé sur place.
+      - `Ctrl+Z` doit tout défaire d'un seul coup : la voie supprimée revient, la
+        géométrie de l'autre aussi.
+      - Sélectionner deux bâtiments qui NE se touchent pas doit refuser avec un
+        message, sans rien modifier.
 
 ## Scénario 2 — entrée dans l'éditeur depuis la carte
 
