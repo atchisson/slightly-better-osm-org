@@ -98,10 +98,11 @@ void (async () => {
   // peut différer de celle de la surface. On mesure donc l'origine de `surface`
   // elle-même via getBoundingClientRect() et on convertit depuis les coordonnées
   // écran absolues (clientX/clientY), qui elles ne dépendent jamais de la cible.
-  const toLonLat = (e: MouseEvent): LonLat => {
+  const ecranRelatif = (e: MouseEvent): [number, number] => {
     const rect = surface.getBoundingClientRect();
-    return bridge.invert([e.clientX - rect.left, e.clientY - rect.top]);
+    return [e.clientX - rect.left, e.clientY - rect.top];
   };
+  const toLonLat = (e: MouseEvent): LonLat => bridge.invert(ecranRelatif(e));
 
   // Amélioration de tracé — étape 1 : viser et montrer, sans rien modifier.
   //
@@ -118,8 +119,12 @@ void (async () => {
   const improve = createImproveMode({
     selectedWays: () => bridge.selectedWays(),
     project: p => bridge.project(p),
-    showTarget: (loc, kind) => cibleOverlay.showTarget(loc, kind),
+    showTarget: (loc, kind, partage) => cibleOverlay.showTarget(loc, kind, partage),
     hideTarget: () => cibleOverlay.hideTarget(),
+    moveNode: (id, loc) => bridge.moveNode(id, loc),
+    insertNodeOnEdge: (edge, loc) => bridge.insertNodeOnEdge(edge, loc),
+    nodeIsShared: id => bridge.nodeIsShared(id),
+    invert: ecran => bridge.invert(ecran),
   });
   createCtrlShortcut({
     isEnabled: () => improve.isEnabled(),
@@ -130,13 +135,15 @@ void (async () => {
   let frame = 0;
   surface.addEventListener('mousemove', (e) => {
     const ev = e as MouseEvent;
-    if (improve.isEnabled()) {
-      const rect = surface.getBoundingClientRect();
-      improve.hoverAt([ev.clientX - rect.left, ev.clientY - rect.top]);
-    }
-    if (!mode.isEnabled()) return;
+    if (!improve.isEnabled() && !mode.isEnabled()) return;
+    // Un seul étranglement par image pour les deux modes : `mousemove` dépasse
+    // allègrement 60 Hz, et viser une route de 2 000 sommets la reprojette en entier
+    // (0,15 ms mesurées) — à chaque événement, ça finit par se voir.
     cancelAnimationFrame(frame);
-    frame = requestAnimationFrame(() => mode.hoverAt(toLonLat(ev)));
+    frame = requestAnimationFrame(() => {
+      if (improve.isEnabled()) improve.hoverAt(ecranRelatif(ev));
+      if (mode.isEnabled()) mode.hoverAt(toLonLat(ev));
+    });
   });
 
   // Le curseur qui quitte la carte est un des chemins de sortie de l'overlay (voir
@@ -150,9 +157,19 @@ void (async () => {
   });
 
   surface.addEventListener('click', (e) => {
+    const ev = e as MouseEvent;
+    // La visée passe avant : les deux modes s'excluent par la couche affichée, mais
+    // l'ordre reste explicite plutôt que dépendant de cette exclusion.
+    if (improve.isEnabled() && improve.clickAt(ecranRelatif(ev))) {
+      // iD traiterait le même clic comme une sélection et désélectionnerait la voie
+      // qu'on est en train de préciser.
+      ev.preventDefault();
+      ev.stopPropagation();
+      return;
+    }
     if (!mode.isEnabled()) return;
-    void mode.clickAt(toLonLat(e as MouseEvent));
-  });
+    void mode.clickAt(toLonLat(ev));
+  }, true);
 
   // Le raccourci Ctrl est le SEUL déclencheur du greffon : il n'y a pas de bouton.
   // Maintenir Ctrl arme le mode le temps de l'appui, et seulement quand une couche

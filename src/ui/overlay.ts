@@ -33,8 +33,12 @@ export interface Overlay {
    * un segment — là où un clic insérerait un nœud. La distinction doit se voir sans
    * lire de légende : c'est elle qui dit ce que le geste va faire, avant qu'il ne soit
    * fait.
+   *
+   * `partage` vire la marque à l'orange : le nœud appartient à plusieurs voies, et le
+   * déplacer déplacera la jonction pour toutes. Sur une route, c'est le cas courant,
+   * pas l'exception.
    */
-  showTarget(loc: LonLat, kind: 'noeud' | 'segment'): void;
+  showTarget(loc: LonLat, kind: 'noeud' | 'segment', partage?: boolean): void;
   hideTarget(): void;
   redraw(): void;
   destroy(): void;
@@ -83,7 +87,7 @@ export function createOverlay(bridge: IdBridge): Overlay {
   // de carte (draw), jamais mémorisé en coordonnées écran — sinon un pan ou un zoom
   // laisserait le contour affiché à l'ancienne position.
   let current: Ring | null = null;
-  let cible: { loc: LonLat; kind: 'noeud' | 'segment' } | null = null;
+  let cible: { loc: LonLat; kind: 'noeud' | 'segment'; partage: boolean } | null = null;
 
   const drawTarget = (): void => {
     if (!cible) { marque.setAttribute('visibility', 'hidden'); return; }
@@ -92,7 +96,9 @@ export function createOverlay(bridge: IdBridge): Overlay {
     marque.setAttribute('cy', String(y));
     // Plein pour un sommet existant, creux pour un point d'insertion : la forme dit
     // si le clic déplacera quelque chose ou en ajoutera.
-    marque.setAttribute('fill', cible.kind === 'noeud' ? '#2e7dd7' : 'rgba(255,255,255,0.85)');
+    const teinte = cible.partage ? '#e08a2e' : '#2e7dd7';
+    marque.setAttribute('stroke', teinte);
+    marque.setAttribute('fill', cible.kind === 'noeud' ? teinte : 'rgba(255,255,255,0.85)');
     marque.setAttribute('visibility', 'visible');
   };
 
@@ -126,7 +132,7 @@ export function createOverlay(bridge: IdBridge): Overlay {
       draw();
     },
     hide() { current = null; draw(); },
-    showTarget(loc, kind) { cible = { loc, kind }; drawTarget(); },
+    showTarget(loc, kind, partage = false) { cible = { loc, kind, partage }; drawTarget(); },
     hideTarget() { cible = null; drawTarget(); },
     redraw: draw,
     destroy() { stopListening(); svg.remove(); },

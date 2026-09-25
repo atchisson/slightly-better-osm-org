@@ -122,6 +122,29 @@ export interface IdBridge {
    */
   selectedWays(): OsmWay[];
   /**
+   * Déplace un nœud existant. Une transaction, donc un `Ctrl+Z`.
+   *
+   * **Ne passe par aucune action nommée d'iD** : `perform` accepte n'importe quelle
+   * fonction de graphe, et `osmNode.move()` est déjà employé par `actionAddMidpoint`,
+   * dont le fonctionnement est vérifié en session. Une primitive de moins à supposer.
+   */
+  moveNode(nodeId: string, loc: LonLat): void;
+  /**
+   * Insère un nœud au milieu d'une arête existante, désignée par ses deux nœuds.
+   *
+   * `actionAddMidpoint` coud le nœud dans TOUTES les voies portant cette arête : sur
+   * une route, c'est le comportement voulu à une jonction.
+   */
+  insertNodeOnEdge(edge: [string, string], loc: LonLat): void;
+  /**
+   * Ce nœud appartient-il à plus d'une voie ? `null` si on ne peut pas le savoir.
+   *
+   * Sert à prévenir AVANT le clic : sur une route, les jonctions sont partout, et
+   * déplacer un nœud de jonction déplace la jonction pour toutes les voies qui s'y
+   * rejoignent. C'est souvent ce qu'on veut — mais ça doit se voir.
+   */
+  nodeIsShared(nodeId: string): boolean | null;
+  /**
    * Applique une fusion : la voie conservée reçoit la géométrie et les tags unis, la
    * seconde est supprimée.
    *

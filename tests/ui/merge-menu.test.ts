@@ -38,6 +38,9 @@ const fauxBridge = (): IdBridge => ({
   cadastreVisible: () => true,
   selectedBuildings: () => selection,
   selectedWays: () => [],
+  moveNode: () => {},
+  insertNodeOnEdge: () => {},
+  nodeIsShared: () => null,
   mergeBuildings: (plan) => { fusions.push(plan); },
   onEditMenu: (cb) => { menuCb = cb; return () => { menuCb = null; }; },
 });

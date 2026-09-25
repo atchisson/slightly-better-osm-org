@@ -8,6 +8,14 @@
 sommet, en insérer un, en supprimer un — ce que fait le mode *Improve Way
 Accuracy* de JOSM.
 
+**Usage visé : les routes**, précisé le 2026-09-25. Conséquences, toutes
+vérifiées depuis : les voies sont ouvertes (et parfois fermées — un rond-point),
+longues (0,15 ms pour viser 2 000 sommets, mesuré : pas de préfiltrage
+nécessaire, mais un étranglement par image oui), et surtout **pleines de
+jonctions**. Déplacer un nœud de jonction déplace la jonction pour toutes les
+voies qui s'y rejoignent : c'est souvent ce qu'on veut, jamais ce qu'on doit
+découvrir après coup.
+
 ---
 
 ## 1. Ce que fait JOSM, vérifié
@@ -80,9 +88,9 @@ Ce mode **modifie et supprime des objets d'autrui**. Le greffon a déjà franchi
 pas avec la couture des murs mitoyens, mais celle-ci était bornée à 20 cm et
 accessoire à une création. Ici, c'est l'objet même de la fonction.
 
-Proposition : aucune confirmation, mais **un aperçu obligatoire avant chaque
-clic** (§4) et **une action par clic**, donc un `Ctrl+Z` par geste. C'est le
-contrat de JOSM, et il a fait ses preuves.
+> **Tranché le 2026-09-25 : pas de confirmation.** Ce qui en tient lieu : un
+> aperçu permanent et obligatoire, et une action par clic — donc un `Ctrl+Z` par
+> geste. C'est le contrat de JOSM, et il a fait ses preuves.
 
 ### 2.3 La portée du greffon
 
@@ -202,15 +210,27 @@ difficile à repérer qu'un doublon. À proposer comme option, une fois le mode 
 ## 7. État
 
 - **§2.1 le geste** — tranché : la couche affichée sépare les deux modes.
-- **§2.2 la confirmation** — pas encore nécessaire : l'étape 1 ne modifie rien.
-  À trancher avant l'étape 2, qui déplace un nœud.
+- **§2.2 la confirmation** — tranché : aucune. Aperçu obligatoire et un `Ctrl+Z`
+  par geste.
 - **§2.3 la portée du greffon** — toujours ouvert.
 
-**Étape 1 livrée** le 2026-09-25 : `src/improve/target.ts` (visée, 10 tests),
+**Étapes 1 à 3 livrées** le 2026-09-25 : `src/improve/target.ts` (visée, 10 tests),
 `src/improve/mode.ts` (contrôleur, 8 tests), marque d'aperçu dans
 `src/ui/overlay.ts`, `selectedWays()` dans le bridge. Aucun objet n'est modifié.
 
-Deux écarts assumés par rapport au plan initial :
+La cible décide du geste — un sommet se déplace, un segment reçoit un nœud — de
+sorte qu'aucun second modificateur ne soit à mémoriser. **L'étape 4, la
+suppression, n'est pas livrée** : elle n'a pas été demandée, et sa règle de
+sûreté (refuser un nœud partagé ou tagué) repose sur `graph.parentWays`, une
+primitive d'iD non vérifiée. La livrer sans elle reviendrait à casser des
+jonctions en silence.
+
+Trois écarts assumés par rapport au plan initial :
+
+- `moveNode` ne passe par **aucune action nommée d'iD** : `perform` accepte une
+  fonction de graphe, et `osmNode.move()` est déjà employé par
+  `actionAddMidpoint`, dont le fonctionnement est vérifié en session. Une
+  primitive supposée de moins — le §3 en prévoyait une.
 
 - `selectedWays()` a été ajouté à côté de `selectedBuildings()` plutôt que de
   réutiliser ce dernier : préciser le tracé d'une haie ou d'un chemin est aussi

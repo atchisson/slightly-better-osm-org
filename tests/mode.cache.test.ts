@@ -44,6 +44,9 @@ describe('chargement par défaut — le cache ne peut jamais faire échouer le c
       cadastreVisible: () => true,
       selectedBuildings: () => [],
       selectedWays: () => [],
+      moveNode: () => {},
+      insertNodeOnEdge: () => {},
+      nodeIsShared: () => null,
       mergeBuildings: () => {},
       onEditMenu: () => () => {},
     };

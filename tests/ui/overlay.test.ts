@@ -21,6 +21,9 @@ const fauxBridge = (container: HTMLElement): IdBridge => ({
   cadastreVisible: () => true,
   selectedBuildings: () => [],
   selectedWays: () => [],
+  moveNode: () => {},
+  insertNodeOnEdge: () => {},
+  nodeIsShared: () => null,
   mergeBuildings: () => {},
   onEditMenu: () => () => {},
 });
@@ -48,6 +51,9 @@ const fauxBridgeAvecDeplacements = (container: HTMLElement) => {
     cadastreVisible: () => true,
     selectedBuildings: () => [],
     selectedWays: () => [],
+    moveNode: () => {},
+    insertNodeOnEdge: () => {},
+    nodeIsShared: () => null,
     mergeBuildings: () => {},
     onEditMenu: () => () => {},
   };
@@ -182,6 +188,9 @@ describe('overlay — origine de la projection', () => {
       cadastreVisible: () => true,
       selectedBuildings: () => [],
       selectedWays: () => [],
+      moveNode: () => {},
+      insertNodeOnEdge: () => {},
+      nodeIsShared: () => null,
       mergeBuildings: () => {},
       onEditMenu: () => () => {},
     };

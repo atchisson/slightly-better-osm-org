@@ -65,6 +65,9 @@ describe('mode cadastre', () => {
       cadastreVisible: () => true,
       selectedBuildings: () => [],
       selectedWays: () => [],
+      moveNode: () => {},
+      insertNodeOnEdge: () => {},
+      nodeIsShared: () => null,
       mergeBuildings: () => {},
       onEditMenu: () => () => {},
     };
@@ -883,6 +886,9 @@ describe('mode cadastre — commune introuvable vs réseau (defaultLoadDataset)'
       cadastreVisible: () => true,
       selectedBuildings: () => [],
       selectedWays: () => [],
+      moveNode: () => {},
+      insertNodeOnEdge: () => {},
+      nodeIsShared: () => null,
       mergeBuildings: () => {},
       onEditMenu: () => () => {},
     };
@@ -968,6 +974,9 @@ describe('mode cadastre — réutilisation des nœuds sur un bâtiment de taille
       cadastreVisible: () => true,
       selectedBuildings: () => [],
       selectedWays: () => [],
+      moveNode: () => {},
+      insertNodeOnEdge: () => {},
+      nodeIsShared: () => null,
       mergeBuildings: () => {},
       onEditMenu: () => () => {},
     };

@@ -725,6 +725,35 @@ function buildBridge(c: any): IdBridge {
       }
     },
 
+    moveNode(nodeId: string, loc: LonLat): void {
+      const deplacer = (graph: any) => graph.replace(graph.entity(nodeId).move(loc));
+      c.perform(deplacer, 'Déplacement d’un nœud (cadastre-id)');
+      buildingCache = null;
+    },
+
+    insertNodeOnEdge(edge: [string, string], loc: LonLat): void {
+      const iD = (globalThis as any).iD;
+      const node = instancier(iD.osmNode, { loc });
+      c.perform(
+        instancier(iD.actionAddMidpoint, { loc, edge }, node),
+        'Ajout d’un nœud (cadastre-id)',
+      );
+      buildingCache = null;
+    },
+
+    nodeIsShared(nodeId: string): boolean | null {
+      // `graph.parentWays` n'a pas été vérifié par le spike : on ne devine pas, on
+      // rend « je ne sais pas » plutôt qu'un « non » rassurant et faux.
+      try {
+        const graph = c.graph() as { entity: (id: string) => unknown; parentWays?: (e: unknown) => unknown[] };
+        if (typeof graph.parentWays !== 'function') return null;
+        const parents = graph.parentWays(graph.entity(nodeId));
+        return Array.isArray(parents) ? parents.length > 1 : null;
+      } catch {
+        return null;
+      }
+    },
+
     mergeBuildings(plan: Extract<MergePlan, { ok: true }>): void {
       const iD = (globalThis as any).iD;
       // Action maison plutôt qu'une action d'iD : aucune de ses actions ne remplace la

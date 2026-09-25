@@ -12,20 +12,30 @@ const carre: OsmWay = {
 };
 
 let selection: OsmWay[];
-let montres: { loc: LonLat; kind: string }[];
+let montres: { loc: LonLat; kind: string; partage: boolean }[];
 let caches: number;
+let deplaces: { id: string; loc: LonLat }[];
+let inseres: { edge: [string, string]; loc: LonLat }[];
+let partageRendu: boolean | null;
 
 const hooks = (): ImproveHooks => ({
   selectedWays: () => selection,
   project: (p) => [p[0] * 1000, -p[1] * 1000],
-  showTarget: (loc, kind) => { montres.push({ loc, kind }); },
+  invert: (e) => [e[0] / 1000, -e[1] / 1000],
+  showTarget: (loc, kind, partage) => { montres.push({ loc, kind, partage }); },
   hideTarget: () => { caches++; },
+  moveNode: (id, loc) => { deplaces.push({ id, loc }); },
+  insertNodeOnEdge: (edge, loc) => { inseres.push({ edge, loc }); },
+  nodeIsShared: () => partageRendu,
 });
 
 beforeEach(() => {
   selection = [carre];
   montres = [];
   caches = 0;
+  deplaces = [];
+  inseres = [];
+  partageRendu = null;
 });
 
 describe('createImproveMode', () => {
@@ -118,5 +128,76 @@ describe('createImproveMode', () => {
     expect(m.isEnabled()).toBe(false);
     expect(caches).toBe(1);
     expect(m.cible()).toBeNull();
+  });
+
+  it('déplace le sommet visé SOUS le curseur', () => {
+    const m = createImproveMode(hooks());
+    m.enable();
+
+    // Curseur à 8 px du coin B : la cible est B, mais la destination est le curseur.
+    expect(m.clickAt([108, 0])).toBe(true);
+
+    expect(deplaces).toHaveLength(1);
+    expect(deplaces[0]!.id).toBe('nB');
+    expect(deplaces[0]!.loc[0]).toBeCloseTo(0.108, 12);
+    expect(inseres).toEqual([]);
+  });
+
+  it('insère un nœud sur le segment visé', () => {
+    const m = createImproveMode(hooks());
+    m.enable();
+
+    expect(m.clickAt([50, 2])).toBe(true);
+
+    expect(inseres).toHaveLength(1);
+    expect(inseres[0]!.edge).toEqual(['nA', 'nB']);
+    // Le nœud inséré tombe SUR l'arête, pas sous le curseur : ailleurs, il
+    // déformerait la voie au lieu de la préciser.
+    expect(inseres[0]!.loc[1]).toBeCloseTo(0, 12);
+    expect(deplaces).toEqual([]);
+  });
+
+  it('ne fait rien, et le dit, quand rien n’est visé', () => {
+    const m = createImproveMode(hooks());
+    m.enable();
+
+    // Le retour `false` laisse l'appelant rendre le clic à iD.
+    expect(m.clickAt([500, 500])).toBe(false);
+    expect(deplaces).toEqual([]);
+    expect(inseres).toEqual([]);
+  });
+
+  it('ne fait rien tant qu’il n’est pas armé', () => {
+    const m = createImproveMode(hooks());
+
+    expect(m.clickAt([108, 0])).toBe(false);
+    expect(deplaces).toEqual([]);
+  });
+
+  it('recalcule la cible au clic plutôt que de reprendre celle du survol', () => {
+    // Entre le dernier survol et le clic, la carte a pu bouger sous le curseur.
+    const m = createImproveMode(hooks());
+    m.enable();
+    m.hoverAt([100, 0]);          // vise nB
+
+    m.clickAt([0, 0]);            // mais le clic tombe sur nA
+
+    expect(deplaces[0]!.id).toBe('nA');
+  });
+
+  it('signale un nœud partagé, et ne suppose rien quand c’est indéterminable', () => {
+    // Sur une route, les jonctions sont partout : déplacer l'une d'elles déplace la
+    // jonction pour toutes les voies qui s'y rejoignent.
+    partageRendu = true;
+    const m = createImproveMode(hooks());
+    m.enable();
+    m.hoverAt([100, 0]);
+    expect(montres.at(-1)!.partage).toBe(true);
+
+    // `null` signifie « je ne sais pas » : on n'alarme pas sans savoir, et aucune
+    // action n'en dépend.
+    partageRendu = null;
+    m.hoverAt([0, 0]);
+    expect(montres.at(-1)!.partage).toBe(false);
   });
 });
