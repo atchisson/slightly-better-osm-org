@@ -255,27 +255,37 @@ export function captureContext(): Promise<unknown> {
       },
     });
 
+    const expose = (value: any): void => {
+      try {
+        if (hasFrozenCoreContext(value)) {
+          console.log(
+            "[sb-osm] désactivé : coreContext est une propriété figée (non " +
+            "configurable, non inscriptible) ; l'éditeur démarre normalement sans " +
+            `le greffon. ${DISABLE_HINT}`,
+          );
+          exposed = value;
+          return;
+        }
+        exposed = wrap(value);
+      } catch {
+        exposed = value; // iD doit démarrer même si on échoue
+      }
+    };
+
     try {
+      // Le script est parfois injecté APRÈS iD.js (course d'injection du gestionnaire
+      // de userscripts), qui a déjà fait `window.iD = index_exports`. Poser l'accesseur
+      // sans reprendre cette valeur la masquait derrière `undefined` : le bootstrap
+      // d'osm.org affichait alors « This editor is supported in Firefox… ». Un
+      // accesseur déjà posé par un tiers n'est pas le nôtre à remplacer : on s'abstient.
+      const existing = Object.getOwnPropertyDescriptor(globalThis, 'iD');
+      if (existing && !('value' in existing)) return;
       Object.defineProperty(globalThis, 'iD', {
         configurable: true,
         get: () => exposed,
-        set(value: any) {
-          try {
-            if (hasFrozenCoreContext(value)) {
-              console.log(
-                "[sb-osm] désactivé : coreContext est une propriété figée (non " +
-                "configurable, non inscriptible) ; l'éditeur démarre normalement sans " +
-                `le greffon. ${DISABLE_HINT}`,
-              );
-              exposed = value;
-              return;
-            }
-            exposed = wrap(value);
-          } catch {
-            exposed = value; // iD doit démarrer même si on échoue
-          }
-        },
+        set: expose,
       });
+      if (existing && existing.value !== undefined) expose(existing.value);
     } catch {
       /* on ne peut pas piéger : whenReady ne résoudra pas, l'auto-test désactivera */
     }

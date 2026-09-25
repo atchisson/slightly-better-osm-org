@@ -19,6 +19,23 @@ describe('captureContext', () => {
     await expect(promise).resolves.toBe(faux);
   });
 
+  // Plantage intermittent observé en réel (Firefox + Violentmonkey, ~1 lancement sur
+  // 10) : le userscript est parfois injecté APRÈS l'exécution d'iD.js, qui fait
+  // `window.iD = index_exports`. Poser alors l'accesseur écrasait le namespace par un
+  // getter renvoyant `undefined` ; le bootstrap d'osm.org (au DOMContentLoaded) voyait
+  // `typeof iD === "undefined"` et affichait « This editor is supported in Firefox… ».
+  it('ne masque jamais un window.iD déjà affecté avant l’installation du piège', async () => {
+    const faux = { marker: 'ctx' };
+    const ns = { coreContext: () => faux, version: '2.30.0' };
+    (globalThis as any).iD = ns;
+    const promise = captureContext();
+    expect((globalThis as any).iD).toBeDefined();
+    expect((globalThis as any).iD.version).toBe('2.30.0');
+    // Le bootstrap d'osm.org n'a pas encore tourné : la capture doit rester possible.
+    expect((globalThis as any).iD.coreContext()).toBe(faux);
+    await expect(promise).resolves.toBe(faux);
+  });
+
   it('laisse le namespace lisible et intact pour la page', async () => {
     captureContext();
     const ns = { coreContext: () => ({}), version: '2.30.0' };
