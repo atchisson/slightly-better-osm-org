@@ -1,0 +1,63 @@
+# Publie le userscript en pièce jointe d'une release GitHub, au push d'un tag.
+#
+# Pourquoi une release plutôt que `dist/` versionné : le fichier construit change à
+# chaque build (ne serait-ce que son numéro de version), et l'historique se
+# remplirait de bruit. L'URL `releases/latest/download/<fichier>` est permanente et
+# sert toujours la dernière release — c'est elle que porte `@downloadURL`.
+#
+# Déclenché par un TAG et non par un push sur `main` : publier un outil qui modifie
+# des données OpenStreetMap doit être un acte délibéré, pas la conséquence d'un
+# commit.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  publier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # Avant de publier, pas après : une release rouge est pire qu'une release
+      # absente, parce qu'elle s'installe toute seule chez ceux qui ont déjà le script.
+      - run: npm run typecheck
+      - run: npm test
+
+      - run: npm run build
+        env:
+          SBO_VERSION: ${{ github.ref_name }}
+
+      # Le script publié doit annoncer exactement la version de sa release : c'est ce
+      # numéro que les gestionnaires comparent pour décider d'une mise à jour. Un
+      # écart passerait inaperçu jusqu'à ce que les mises à jour cessent, sans erreur.
+      - name: Vérifier que le bandeau porte bien le numéro du tag
+        run: |
+          attendu="${GITHUB_REF_NAME#v}"
+          obtenu=$(grep -m1 '@version' dist/slightly-better-osm-org.user.js | awk '{print $3}')
+          if [ "$attendu" != "$obtenu" ]; then
+            echo "tag $attendu, bandeau $obtenu" >&2
+            exit 1
+          fi
+
+      # `gh` est préinstallé sur les runners : aucune action tierce, ce qui reste
+      # cohérent avec un projet sans dépendance de production.
+      - name: Créer la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME"
+          dist/slightly-better-osm-org.user.js
+          --title "$GITHUB_REF_NAME"
+          --generate-notes

@@ -30,21 +30,38 @@ if (!meta.startsWith(BANNER_START) || !meta.includes(BANNER_END)) {
   );
 }
 
-// Horodatage de construction, à la minute. Il sert deux fois : la ligne d'injection
-// le nomme en console (savoir QUEL build s'exécute a coûté une session entière à
-// analyser une pile d'appels venue de la version précédente), et il complète le
-// numéro de version du bandeau pour que le gestionnaire de scripts distingue deux
-// installations. Quatre composantes numériques strictement croissantes : les
-// gestionnaires les comparent segment par segment.
+// Numéro de version du script publié.
+//
+// En release, il vient du TAG (`SBO_VERSION`, posé par le workflow) : le script
+// installé annonce alors exactement la version de la release dont il provient, ce
+// qu'un horodatage de construction ne permettrait pas — deux personnes construisant
+// la même release obtiendraient deux numéros différents, et le gestionnaire de
+// scripts croirait à une mise à jour.
+//
+// En local, faute de tag, il tombe sur l'horodatage de construction à la minute.
+// Celui-ci a sa propre raison d'être : savoir QUEL build s'exécute a coûté une
+// session entière à analyser une pile d'appels venue de la version précédente,
+// restée installée. La ligne d'injection le nomme en console.
+//
+// Dans les deux cas, des composantes numériques strictement croissantes : les
+// gestionnaires de scripts les comparent segment par segment.
 const d = new Date();
 /** @param {number} n */
 const p2 = (n) => String(n).padStart(2, '0');
 const stamp =
   `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}${p2(d.getHours())}${p2(d.getMinutes())}`;
 
+const tag = (process.env.SBO_VERSION ?? '').trim().replace(/^v/, '');
+if (tag && !/^\d+(\.\d+)*$/.test(tag)) {
+  throw new Error(
+    `esbuild.config.mjs : SBO_VERSION=${JSON.stringify(tag)} n'est pas une suite de ` +
+      'nombres séparés par des points. Un gestionnaire de scripts ne saurait pas la comparer.'
+  );
+}
+
 const bannerVersionne = meta.replace(
   /(\/\/ @version\s+)(\S+)/,
-  (_, prefixe, version) => `${prefixe}${version}.${stamp}`
+  (_, prefixe, version) => `${prefixe}${tag || `${version}.${stamp}`}`
 );
 if (bannerVersionne === meta) {
   throw new Error("esbuild.config.mjs : aucune ligne @version trouvée dans le bandeau de src/meta.ts.");
@@ -57,7 +74,7 @@ await build({
   target: 'es2022',
   outfile: 'dist/slightly-better-osm-org.user.js',
   banner: { js: bannerVersionne },
-  define: { __BUILD__: JSON.stringify(stamp) },
+  define: { __BUILD__: JSON.stringify(tag || `0.1.0.${stamp}`) },
   legalComments: 'none',
 });
 

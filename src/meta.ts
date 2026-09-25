@@ -6,6 +6,10 @@ export const USERSCRIPT_META = `// ==UserScript==
 // @match        https://www.openstreetmap.org/id*
 // @run-at       document-start
 // @license      ISC
+// @homepageURL  https://github.com/atchisson/slightly-better-osm-org
+// @supportURL   https://github.com/atchisson/slightly-better-osm-org/issues
+// @downloadURL  https://github.com/atchisson/slightly-better-osm-org/releases/latest/download/slightly-better-osm-org.user.js
+// @updateURL    https://github.com/atchisson/slightly-better-osm-org/releases/latest/download/slightly-better-osm-org.user.js
 // @grant        none
 // @version      0.1.0
 // ==/UserScript==

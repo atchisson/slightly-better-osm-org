@@ -60,12 +60,18 @@ main.
 
 ## Installation
 
-Il n'y a pas de fichier `.user.js` hébergé publiquement pour l'instant — `dist/` est
-dans `.gitignore` et n'est pas versionné. Le script se construit localement :
+Il faut un gestionnaire de userscripts — [Violentmonkey](https://violentmonkey.github.io/)
+ou Tampermonkey. Ensuite, **[installer la dernière version](https://github.com/atchisson/slightly-better-osm-org/releases/latest/download/slightly-better-osm-org.user.js)**.
+
+Le gestionnaire reconnaît le fichier et propose l'installation. Les mises à jour
+suivantes sont automatiques : le script porte l'adresse de cette même URL, qui sert
+toujours la release la plus récente.
+
+Pour construire depuis les sources :
 
 ```bash
-git clone <url-de-ce-dépôt>
-cd cadastre-id
+git clone https://github.com/atchisson/slightly-better-osm-org.git
+cd slightly-better-osm-org
 npm install
 npm run build
 ```
