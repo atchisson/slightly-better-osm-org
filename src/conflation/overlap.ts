@@ -1,7 +1,20 @@
 import { pointInRing } from '../geometry/union';
 import type { LonLat, Ring } from '../geometry/types';
 
-export interface ExistingBuilding { id: string; ring: Ring; }
+export interface ExistingBuilding {
+  id: string;
+  ring: Ring;
+  /**
+   * Les nœuds OSM de ce contour, dans l'ordre de `ring` (donc même longueur, premier
+   * et dernier identiques). Ils sont requis pour insérer un sommet DANS le mur de ce
+   * bâtiment : une insertion se désigne par l'arête `[idA, idB]` qu'elle coupe, pas
+   * par des coordonnées.
+   *
+   * Optionnels : un contexte iD qui ne les exposerait pas laisse simplement
+   * l'insertion de côté, sans rien casser.
+   */
+  nodeIds?: string[];
+}
 
 const bbox = (r: Ring): [number, number, number, number] => {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;

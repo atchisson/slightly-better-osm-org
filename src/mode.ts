@@ -5,7 +5,7 @@ import { downloadCommune } from './cadastre/download';
 import { readCache, writeCache } from './cadastre/store';
 import { communeAt } from './cadastre/insee';
 import { overlapsExisting } from './conflation/overlap';
-import { snapToExistingNodes, DEFAULT_SNAP_TOLERANCE_M } from './conflation/snap';
+import { snapToExistingNodes, planInsertions, DEFAULT_SNAP_TOLERANCE_M } from './conflation/snap';
 import { dilatedExtent } from './geometry/edges';
 import { buildingTags, changesetComment, changesetSource } from './tagging/tags';
 import { createOverlay, type Overlay } from './ui/overlay';
@@ -416,7 +416,19 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       const millesime = dataset.millesime;
       const tags = buildingTags({ isolatedLight: r.isolatedLight, millesime });
 
-      bridge.createBuilding(snapped.ring, tags, snapped.reused);
+      // Un sommet qui n'a trouvé aucun nœud à réutiliser mais qui tombe sur le MUR
+      // d'un bâtiment OSM existant y est inséré : les deux bâtiments partagent alors
+      // réellement leur paroi, au lieu de deux murs superposés sans nœud commun.
+      // C'est la seule opération du greffon qui modifie un objet existant, et elle
+      // est bornée à 20 cm — au-delà, on déformerait le bâtiment d'autrui plutôt que
+      // de recoudre un mur commun. Voir planInsertions et le README.
+      const insertions = planInsertions(
+        snapped.ring,
+        snapped.reused,
+        bridge.buildingsNear(dilatedExtent(snapped.ring, DEFAULT_SNAP_TOLERANCE_M)),
+        DEFAULT_SNAP_TOLERANCE_M);
+
+      bridge.createBuilding(snapped.ring, tags, snapped.reused, insertions);
       overlay?.hide();
 
       // Après la création seulement : le préremplissage du changeset est une obligation

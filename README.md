@@ -12,10 +12,22 @@ main.
 - **Pas d'import en lot.** Un clic crée un bâtiment, jamais plus. Aucun chemin de code
   ne permet d'en créer mille d'un coup ; c'est structurel, pas une limite de
   configuration.
-- **Aucune modification d'un objet OSM existant, en v1.** Sur un mur mitoyen, le
-  greffon réutilise des nœuds OSM déjà présents — il ne les crée jamais en double —
-  mais il les réutilise **en place, sans jamais les déplacer**, et ne touche donc à
-  aucune géométrie préexistante. Seuls sont réutilisables les sommets d'un bâtiment OSM
+- **Le mur mitoyen est réellement partagé, ce qui modifie le bâtiment voisin.** Sur
+  un mur mitoyen, le greffon réutilise des nœuds OSM déjà présents — il ne les crée
+  jamais en double — **en place, sans jamais les déplacer**. Et quand un coin du
+  nouveau bâtiment tombe au MILIEU du mur du voisin, là où aucun nœud n'existe, ce
+  nœud est **inséré dans le mur du voisin** : les deux bâtiments partagent alors
+  vraiment leur paroi, au lieu de superposer deux murs sans nœud commun.
+
+  Cette insertion **modifie un objet existant** : le mur du voisin passe désormais
+  par notre point, donc sa géométrie bouge — d'au plus 20 cm, la tolérance de
+  recalage. C'est pourquoi cette tolérance reste serrée : au-delà, on ne recoudrait
+  plus un mur commun, on déformerait le bâtiment de quelqu'un d'autre. Un bâtiment
+  tracé sur imagerie et décalé d'un mètre reste hors de portée, délibérément.
+
+  Création et coutures forment **une seule opération** : `Ctrl+Z` défait l'ensemble.
+
+  Seuls sont réutilisables les sommets d'un bâtiment OSM
   (way taguée `building`, ou membre d'une relation `building`) et les nœuds nus
   n'appartenant à aucune autre way : un nœud porteur de tags — une adresse, un arbre,
   du mobilier urbain — et un sommet de voirie sont écartés, pour ne jamais leur faire
@@ -138,8 +150,15 @@ intention :
   `docs/verification-manuelle.md`). Ça ne concerne que ce préremplissage : le tag
   `source` posé sur l'objet créé, l'obligation de conformité elle-même, est écrit
   indépendamment et testé.
-- **Aucun objet existant n'est modifié** (voir plus haut) : la réutilisation de nœuds
-  ne touche jamais à la way qui les porte déjà.
+- **Un objet existant PEUT être modifié**, et c'est le point à signaler en premier à
+  qui audite ces contributions. La réutilisation d'un nœud ne touche jamais à la way
+  qui le porte ; en revanche l'insertion d'un sommet dans un mur mitoyen ajoute un
+  nœud à la way du voisin et déplace sa géométrie d'au plus 20 cm. C'est ce que fait
+  déjà un import semi-automatique sous JOSM, et c'est ce qui donne un mur réellement
+  partagé plutôt que deux murs superposés — mais cela place ces contributions sous les
+  exigences applicables aux édits touchant à l'existant, pas seulement à la création.
+  Chaque insertion est bornée, visible dans l'aperçu avant clic, et annulable avec la
+  création par un seul `Ctrl+Z`.
 
 Voir aussi la lacune connue sur les mots-dièse de changeset, plus bas — c'est le point
 le plus important à connaître si vous voulez auditer les contributions de cet outil en

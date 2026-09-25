@@ -1,4 +1,5 @@
-import { dilatedExtent, segmentLength } from '../geometry/edges';
+import { dilatedExtent, segmentLength, surSegment } from '../geometry/edges';
+import type { ExistingBuilding } from './overlap';
 import type { LonLat, Ring } from '../geometry/types';
 
 export interface ExistingNode { id: string; loc: LonLat; }
@@ -94,4 +95,65 @@ export function snapToExistingNodes(
   }
 
   return { ring: [...snapped, snapped[0]!], reused };
+}
+
+/** Une arête d'un bâtiment OSM existant, dans laquelle insérer un nœud créé. */
+export interface Insertion { wayId: string; edge: [string, string]; }
+
+/**
+ * Pour chaque sommet non recalé, l'arête d'un bâtiment OSM existant sur laquelle il
+ * tombe — afin que le nœud créé y soit INSÉRÉ et que le mur devienne réellement
+ * partagé, au lieu de deux murs superposés sans nœud commun.
+ *
+ * **Ceci modifie un objet existant**, et c'est un choix assumé (voir le README). Un
+ * sommet inséré fait passer le mur du voisin par notre point : sa géométrie change,
+ * d'au plus `toleranceM`. C'est pourquoi la tolérance reste celle du recalage — 20 cm
+ * — et non une valeur confortable : au-delà, on ne recoudrait plus un mur commun, on
+ * déformerait le bâtiment de quelqu'un d'autre.
+ *
+ * Le cas visé est celui du bâti mitoyen déjà importé depuis le cadastre : les
+ * géométries s'accordent alors au centimètre, mais notre coin tombe au MILIEU du mur
+ * du voisin, où il n'y a aucun nœud à réutiliser. C'est exactement la T-jonction que
+ * l'union règle entre polygones cadastraux, transposée à la frontière avec OSM.
+ *
+ * Un bâtiment tracé sur imagerie et décalé d'un mètre reste hors de portée, et c'est
+ * voulu : le souder reviendrait à propager une erreur de calage.
+ *
+ * @param reused résultat de `snapToExistingNodes` : un sommet déjà recalé sur un nœud
+ *               existant n'a rien à faire ici, il partage déjà ce nœud.
+ */
+export function planInsertions(
+  ring: Ring,
+  reused: (string | null)[],
+  buildings: ExistingBuilding[],
+  toleranceM: number = DEFAULT_SNAP_TOLERANCE_M,
+): (Insertion | null)[] {
+  const open = ring.slice(0, -1);
+  const plan: (Insertion | null)[] = new Array(open.length).fill(null);
+
+  for (let i = 0; i < open.length; i++) {
+    if (reused[i]) continue;
+    const vertex = open[i]!;
+
+    let meilleur: { ins: Insertion; ecart: number } | null = null;
+    for (const b of buildings) {
+      const ids = b.nodeIds;
+      if (!ids || ids.length !== b.ring.length) continue;
+      for (let j = 0; j + 1 < b.ring.length; j++) {
+        const a = b.ring[j]!, c = b.ring[j + 1]!;
+        const { t, ecart } = surSegment(vertex, a, c);
+        // Strictement À L'INTÉRIEUR de l'arête : aux extrémités il y a déjà un nœud,
+        // que `snapToExistingNodes` a eu sa chance de réutiliser. Y insérer un second
+        // nœud créerait un doublon au même endroit.
+        if (t <= 0 || t >= 1 || ecart > toleranceM) continue;
+        const idA = ids[j]!, idB = ids[j + 1]!;
+        if (meilleur === null || ecart < meilleur.ecart) {
+          meilleur = { ins: { wayId: b.id, edge: [idA, idB] }, ecart };
+        }
+      }
+    }
+    if (meilleur) plan[i] = meilleur.ins;
+  }
+
+  return plan;
 }

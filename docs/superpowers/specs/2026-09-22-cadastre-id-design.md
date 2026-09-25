@@ -314,7 +314,9 @@ Cette règle est **symétrique** : cliquer le porche ou cliquer la maison donne 
 
 **L'aperçu au survol et le clic appellent la même fonction de composition**, jusqu'à l'étape 6 incluse. C'est une contrainte, pas un détail d'implémentation : l'aperçu est le seul garde-fou contre une annexion erronée, il serait sans valeur s'il pouvait diverger du résultat. Les étapes 7 à 9 ne modifient plus le contour, seulement son rattachement au graphe.
 
-**Recalage sur les nœuds existants.** Tolérance par défaut ~20 cm, réglable. Un nœud existant est **réutilisé en place, jamais déplacé** : c'est le sommet cadastre qui cède. On ne modifie donc aucune géométrie préexistante. Une tolérance serrée est délibérée : elle recoud un bâtiment cadastre voisin déjà importé, mais ne happe pas un bâtiment tracé à main levée sur imagerie et décalé d'un mètre.
+**Recalage sur les nœuds existants.** Tolérance par défaut ~20 cm, réglable. Un nœud existant est **réutilisé en place, jamais déplacé** : c'est le sommet cadastre qui cède.
+
+> **Corrigé le 2026-09-25, sur décision de l'utilisateur.** Ce paragraphe affirmait ensuite « on ne modifie donc aucune géométrie préexistante ». Ce n'est plus vrai, et c'était une limite réelle : un coin du nouveau bâtiment qui tombe au MILIEU du mur du voisin ne trouve aucun nœud à réutiliser, et les deux murs se superposaient sans partager un seul nœud. Le sommet y est désormais **inséré** (`actionAddMidpoint`), ce qui ajoute un nœud à la way du voisin et déplace sa géométrie d'au plus la tolérance, 20 cm. C'est la T-jonction que §5 règle entre polygones cadastraux, transposée à la frontière avec OSM — et c'est ce que fait un import semi-automatique sous JOSM. Conséquence à assumer : ces contributions relèvent désormais des exigences applicables aux édits touchant à l'existant, pas seulement à la création. Création et coutures restent une seule transaction, donc un seul `Ctrl+Z`. Une tolérance serrée est délibérée : elle recoud un bâtiment cadastre voisin déjà importé, mais ne happe pas un bâtiment tracé à main levée sur imagerie et décalé d'un mètre.
 
 ## 6. Tags
 

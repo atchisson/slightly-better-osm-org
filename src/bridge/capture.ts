@@ -1,6 +1,6 @@
 import type { IdBridge } from './types';
 import type { ExistingBuilding } from '../conflation/overlap';
-import type { ExistingNode } from '../conflation/snap';
+import type { ExistingNode, Insertion } from '../conflation/snap';
 import type { LonLat, Ring } from '../geometry/types';
 
 // `storage` ne figure PAS ici : il n'existe plus sur le contexte (spike du 2026-09-23).
@@ -394,6 +394,10 @@ function buildBridge(c: any): IdBridge {
       .map(e => ({
         id: e.id as string,
         ring: (e.nodes as string[]).map(id => graph.entity(id).loc as LonLat),
+        // Les nœuds, pas seulement leurs positions : insérer un sommet dans un mur
+        // existant se désigne par l'arête `[idA, idB]` qu'il coupe (voir
+        // planInsertions et createBuilding).
+        nodeIds: e.nodes as string[],
       }));
     return buildingCache;
   };
@@ -537,22 +541,43 @@ function buildBridge(c: any): IdBridge {
           n.loc[1] >= minLat && n.loc[1] <= maxLat);
     },
 
-    createBuilding(ring: Ring, tags: Record<string, string>, reused: (string | null)[]): void {
+    createBuilding(
+      ring: Ring,
+      tags: Record<string, string>,
+      reused: (string | null)[],
+      insertions: (Insertion | null)[] = [],
+    ): void {
       const iD = (globalThis as any).iD;
       const open = ring.slice(0, -1);
       const nodeIds: string[] = [];
       const created: any[] = [];
+      const aInserer: { node: any; edge: [string, string] }[] = [];
 
       open.forEach((loc, i) => {
         const existing = reused[i];
         if (existing) { nodeIds.push(existing); return; }
         const node = instancier(iD.osmNode, { loc });
-        created.push(node);
         nodeIds.push(node.id);
+        // Un sommet qui tombe sur le mur d'un bâtiment existant y est INSÉRÉ plutôt
+        // qu'ajouté à côté : les deux bâtiments partagent alors réellement ce nœud.
+        // `actionAddMidpoint` ajoute le nœud ET le coud dans toutes les voies qui
+        // portent cette arête — inutile de l'ajouter séparément.
+        const ins = insertions[i];
+        if (ins) aInserer.push({ node, edge: ins.edge });
+        else created.push(node);
       });
 
       const way = instancier(iD.osmWay, { tags, nodes: [...nodeIds, nodeIds[0]!] });
-      const actions = [...created, way].map(entity => instancier(iD.actionAddEntity, entity));
+      // Une seule transaction, dans cet ordre : les nœuds existent avant la voie qui
+      // les référence. Ctrl+Z défait l'ensemble — création ET coutures — en une fois,
+      // ce que la spec exige et qui importe d'autant plus maintenant qu'on touche à
+      // des objets existants.
+      const actions = [
+        ...created.map(e => instancier(iD.actionAddEntity, e)),
+        ...aInserer.map(({ node, edge }) =>
+          instancier(iD.actionAddMidpoint, { loc: node.loc, edge }, node)),
+        instancier(iD.actionAddEntity, way),
+      ];
       c.perform(...actions, 'Bâtiment depuis le cadastre');
       buildingCache = null; // notre propre modification du graphe invalide le cache
       c.enter(instancier(iD.modeSelect, c, [way.id]));

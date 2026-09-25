@@ -59,3 +59,23 @@ export function buildEdgeIndex(polys: Poly[]): Map<string, number[]> {
   }
   return index;
 }
+
+/**
+ * Position d'un point le long d'un segment (`t`, entre 0 et 1 sur le segment) et son
+ * écart perpendiculaire à ce segment, en mètres.
+ *
+ * Mutualisée : l'union en a besoin pour découper une arête aux sommets d'un voisin,
+ * et le recalage pour savoir si un sommet tombe sur le mur d'un bâtiment OSM
+ * existant. Deux copies de cette projection divergeraient tôt ou tard.
+ */
+export function surSegment(v: LonLat, a: LonLat, b: LonLat): { t: number; ecart: number } {
+  const k = Math.cos((a[1] * Math.PI) / 180) * METRES_PAR_DEGRE_LAT;
+  const ax = a[0] * k, ay = a[1] * METRES_PAR_DEGRE_LAT;
+  const bx = b[0] * k, by = b[1] * METRES_PAR_DEGRE_LAT;
+  const vx = v[0] * k, vy = v[1] * METRES_PAR_DEGRE_LAT;
+  const dx = bx - ax, dy = by - ay;
+  const l2 = dx * dx + dy * dy;
+  if (l2 === 0) return { t: 0, ecart: Infinity };
+  const t = ((vx - ax) * dx + (vy - ay) * dy) / l2;
+  return { t, ecart: Math.hypot(vx - (ax + t * dx), vy - (ay + t * dy)) };
+}

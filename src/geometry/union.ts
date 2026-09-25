@@ -1,4 +1,4 @@
-import { edgeKey, METRES_PAR_DEGRE_LAT } from './edges';
+import { edgeKey, METRES_PAR_DEGRE_LAT, surSegment } from './edges';
 import type { LonLat, Poly, Ring } from './types';
 
 export type UnionResult =
@@ -69,19 +69,6 @@ export function pointInPoly(pt: LonLat, poly: Poly): boolean {
  * moins de 2 cm d'une ligne est considéré comme posé dessus.
  */
 const SUR_ARETE_M = 0.02;
-
-/** Position d'un point le long d'un segment, et son écart à ce segment, en mètres. */
-function surSegment(v: LonLat, a: LonLat, b: LonLat): { t: number; ecart: number } {
-  const k = Math.cos((a[1] * Math.PI) / 180) * METRES_PAR_DEGRE_LAT;
-  const ax = a[0] * k, ay = a[1] * METRES_PAR_DEGRE_LAT;
-  const bx = b[0] * k, by = b[1] * METRES_PAR_DEGRE_LAT;
-  const vx = v[0] * k, vy = v[1] * METRES_PAR_DEGRE_LAT;
-  const dx = bx - ax, dy = by - ay;
-  const l2 = dx * dx + dy * dy;
-  if (l2 === 0) return { t: 0, ecart: Infinity };
-  const t = ((vx - ax) * dx + (vy - ay) * dy) / l2;
-  return { t, ecart: Math.hypot(vx - (ax + t * dx), vy - (ay + t * dy)) };
-}
 
 /**
  * Découpe chaque arête aux sommets des autres membres qui tombent en son milieu.

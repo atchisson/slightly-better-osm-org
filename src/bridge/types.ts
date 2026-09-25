@@ -1,5 +1,5 @@
 import type { ExistingBuilding } from '../conflation/overlap';
-import type { ExistingNode } from '../conflation/snap';
+import type { ExistingNode, Insertion } from '../conflation/snap';
 import type { LonLat, Ring } from '../geometry/types';
 
 /**
@@ -24,7 +24,20 @@ export interface IdBridge {
    * quasiment jamais, en silence.
    */
   nodesIn(extent: [LonLat, LonLat]): ExistingNode[];
-  createBuilding(ring: Ring, tags: Record<string, string>, reused: (string | null)[]): void;
+  /**
+   * @param reused     par sommet, l'id d'un nœud OSM existant à réutiliser, ou null.
+   * @param insertions par sommet, l'arête d'un bâtiment existant dans laquelle
+   *                   insérer le nœud créé — le mur devient alors réellement partagé.
+   *                   **Ceci modifie un objet existant** ; voir `planInsertions`.
+   *                   Tout est joué dans une seule transaction, pour que Ctrl+Z
+   *                   défasse création et coutures d'un seul coup.
+   */
+  createBuilding(
+    ring: Ring,
+    tags: Record<string, string>,
+    reused: (string | null)[],
+    insertions?: (Insertion | null)[],
+  ): void;
   /**
    * Préremplit le commentaire ET le champ source du panneau de sauvegarde d'iD.
    *

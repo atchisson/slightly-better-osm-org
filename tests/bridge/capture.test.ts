@@ -1081,3 +1081,64 @@ describe('createBuilding — les entités d’iD sont des classes', () => {
     }
   });
 });
+
+describe('createBuilding — coudre le mur d’un voisin, en une seule transaction', () => {
+  // Choix assumé par l'utilisateur : le greffon modifie désormais un objet existant
+  // pour que le mur mitoyen soit réellement partagé. Deux exigences en découlent —
+  // utiliser l'action d'iD qui coud (actionAddMidpoint, qui ajoute le nœud ET le
+  // splice dans toutes les voies portant l'arête), et ne faire qu'un seul perform,
+  // faute de quoi Ctrl+Z défairait la couture et la création séparément.
+  const ctxSimple = () => ({
+    map: () => ({ extent: () => ({ rectangle: () => [-90, -90, 90, 90] }), on: () => {} }),
+    history: () => ({ intersects: () => [] }),
+    graph: () => ({ entity: () => ({ loc: [0, 0] }) }),
+    projection: Object.assign((p: unknown) => p, { invert: (p: unknown) => p }),
+    perform: vi.fn(),
+    enter: vi.fn(),
+    container: () => ({}),
+  });
+
+  const carre: [number, number][] = [[5, 5], [6, 5], [6, 6], [5, 6], [5, 5]];
+
+  const iDavecTraces = () => {
+    const midpoints: unknown[] = [];
+    let compteur = 0;
+    (globalThis as any).iD = {
+      osmNode: (props: any) => ({ id: `n${++compteur}`, ...props }),
+      osmWay: (props: any) => ({ id: 'w1', ...props }),
+      actionAddEntity: (e: unknown) => e,
+      actionAddMidpoint: (mid: unknown, node: unknown) => { midpoints.push({ mid, node }); return mid; },
+      modeSelect: () => ({}),
+    };
+    return midpoints;
+  };
+
+  it('insère le nœud dans l’arête désignée plutôt que de le poser à côté', () => {
+    const ctx = ctxSimple();
+    const midpoints = iDavecTraces();
+    try {
+      makeBridge(ctx).createBuilding(carre, { building: 'yes' }, [null, null, null, null],
+        [{ wayId: 'w100', edge: ['n100', 'n101'] }, null, null, null]);
+
+      expect(midpoints).toHaveLength(1);
+      expect((midpoints[0] as any).mid.edge).toEqual(['n100', 'n101']);
+      // Une seule transaction : création et couture s'annulent ensemble.
+      expect(ctx.perform).toHaveBeenCalledOnce();
+    } finally {
+      delete (globalThis as any).iD;
+    }
+  });
+
+  it('sans insertion, ne touche à aucun objet existant', () => {
+    const ctx = ctxSimple();
+    const midpoints = iDavecTraces();
+    try {
+      makeBridge(ctx).createBuilding(carre, { building: 'yes' }, [null, null, null, null]);
+
+      expect(midpoints).toHaveLength(0);
+      expect(ctx.perform).toHaveBeenCalledOnce();
+    } finally {
+      delete (globalThis as any).iD;
+    }
+  });
+});
