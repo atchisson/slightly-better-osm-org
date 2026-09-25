@@ -16,7 +16,7 @@ const MESSAGES: Record<AnyRefusal, string> = {
   // Le libellé du brief (« Le contour cadastre est vide. ») échoue à ce test pour cette
   // raison précise — corrigé ici, sans toucher au test.
   'vide': 'Le contour cadastre ne comporte aucun point : rien à créer.',
-  'batiment-existant': 'Un bâtiment OSM existe déjà ici : cette version ne remplace pas la géométrie existante.',
+  'batiment-existant': 'Un bâtiment OSM couvre déjà cet emplacement : cette version ne remplace pas la géométrie existante.',
   'commune-introuvable': 'Commune introuvable ou hors couverture du cadastre français.',
   'reseau': 'Données cadastre indisponibles : vérifiez votre connexion.',
   // Un clic pendant un chargement ne crée rien : l'aperçu au survol est caché tant que

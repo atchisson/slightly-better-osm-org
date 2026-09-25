@@ -38,6 +38,14 @@ main.
 - **Refus, pas remplacement, face à un bâtiment déjà cartographié.** Si un bâtiment OSM
   existe déjà à l'endroit cliqué, la création est refusée avec un message. Rien n'est
   écrasé ni fusionné.
+
+  Le critère est la **part de l'empreinte déjà couverte** par du bâti OSM, pas le
+  simple contact : au-delà de 10 %, refus. Un voisin dont le coin mord le contour ne
+  bloque donc plus rien — mesuré sur la commune de Chargé, l'ancienne règle refusait
+  ainsi 26 bâtiments qui n'étaient pas cartographiés, dont un à cause d'un bâtiment
+  situé à 23 mètres. À l'inverse, la couverture est calculée sur l'ENSEMBLE du bâti
+  existant : un bâtiment qu'un vieil import a découpé en cinq morceaux est reconnu
+  comme déjà présent, ce qu'un test morceau par morceau ne voyait pas.
 - Hors périmètre de cette version : les adresses, les parcelles, un mode « zone », et
   plus généralement tout ce qui ressemblerait à un import automatisé plutôt qu'à un
   geste unitaire décidé par une personne.

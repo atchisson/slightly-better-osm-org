@@ -15,6 +15,6 @@ describe('refusalMessage', () => {
   }
 
   it('dit quoi faire quand un bâtiment existe déjà', () => {
-    expect(refusalMessage('batiment-existant')).toMatch(/existe déjà/i);
+    expect(refusalMessage('batiment-existant')).toMatch(/couvre déjà/i);
   });
 });

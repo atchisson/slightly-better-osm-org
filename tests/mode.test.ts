@@ -99,7 +99,7 @@ describe('mode cadastre', () => {
     await mode.clickAt([0.0005, 0.0005]);
 
     expect(created).toHaveLength(0);
-    expect(d.notify).toHaveBeenCalledWith(expect.stringMatching(/existe déjà/i));
+    expect(d.notify).toHaveBeenCalledWith(expect.stringMatching(/couvre déjà/i));
   });
 
   it('préremplit le commentaire de changeset avec la commune', async () => {
