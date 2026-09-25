@@ -1,7 +1,7 @@
 import { composeAt } from './compose';
 import type { Composition } from './compose';
 import { buildDataset, type Dataset } from './cadastre/dataset';
-import { downloadCommune } from './cadastre/download';
+import { downloadCommune, downloadPiscinesForYear } from './cadastre/download';
 import { readCache, writeCache } from './cadastre/store';
 import { communeAt } from './cadastre/insee';
 import { overlapsExisting } from './conflation/overlap';
@@ -75,7 +75,21 @@ async function defaultLoadDataset(pt: LonLat): Promise<Dataset> {
   const commune = await communeAt(pt[1], pt[0]);
   if (!commune) throw new CommuneIntrouvableError();
   const cached = await readCache(commune.code);
-  if (cached) return buildDataset(cached.insee, cached.millesime, cached.features, cached.piscines);
+  if (cached) {
+    // Une entrée écrite avant la prise en charge des piscines n'en porte aucune. Sans
+    // ce complément, la fonctionnalité n'existerait pas — en silence — pour quiconque
+    // a déjà utilisé le greffon sur cette commune, et jusqu'à l'expiration du cache.
+    let piscines = cached.piscines;
+    if (piscines === undefined) {
+      piscines = await downloadPiscinesForYear(cached.insee, cached.millesime);
+      console.log(
+        `[cadastre-id] ${piscines.length} piscine(s) ajoutées au cache de ${cached.insee} ` +
+        '(entrée écrite avant leur prise en charge).',
+      );
+      void writeCache({ ...cached, piscines }).catch(() => { /* confort, jamais bloquant */ });
+    }
+    return buildDataset(cached.insee, cached.millesime, cached.features, piscines);
+  }
   const { features, piscines, millesime } = await downloadCommune(commune.code);
   // Le cache est un confort, jamais une condition du chargement : il est délibérément
   // HORS du chemin de retour. `await writeCache(...)` faisait échouer tout le

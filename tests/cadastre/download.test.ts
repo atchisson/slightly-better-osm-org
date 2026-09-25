@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  datasetUrl, millesimesFromListing, downloadCommune, LISTING_URL,
+  datasetUrl, millesimesFromListing, downloadCommune, downloadPiscinesForYear, LISTING_URL,
 } from '../../src/cadastre/download';
 
 /** Un listing S3 comme en rend le dépôt Etalab, réduit aux préfixes qui nous importent. */
@@ -196,5 +196,54 @@ describe('piscines', () => {
 
     expect(r.features).toHaveLength(1);
     expect(r.piscines).toEqual([]);
+  });
+});
+
+describe('downloadPiscinesForYear — combler une entrée de cache ancienne', () => {
+  const gz = async (o: unknown): Promise<ArrayBuffer> => {
+    const cs = new CompressionStream('gzip');
+    return new Response(new Blob([JSON.stringify(o)]).stream().pipeThrough(cs)).arrayBuffer();
+  };
+  const tsurf = (syms: string[]) => ({
+    features: syms.map(SYM => ({
+      properties: { SYM },
+      geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]] },
+    })),
+  });
+
+  it('ne sert que des millésimes de l’année des bâtiments en cache', async () => {
+    // L'attribution portée par chaque objet créé est une ANNÉE. Servir des piscines de
+    // 2026 sous une attribution 2025 serait une attribution fausse.
+    const sur = await gz(tsurf(['65', '65']));
+    const fetchFn = vi.fn().mockImplementation(async (url: string) => {
+      if (url === LISTING_URL) {
+        return { ok: true, status: 200, text: async () => listing('2025-09-01', '2026-06-01') };
+      }
+      return { ok: true, status: 200, body: new Blob([sur]).stream() };
+    }) as unknown as typeof fetch;
+
+    const r = await downloadPiscinesForYear('49007', '2025', fetchFn);
+
+    expect(r).toHaveLength(2);
+    const urls = (fetchFn as unknown as { mock: { calls: string[][] } }).mock.calls.map(c => c[0]!);
+    expect(urls.some(u => u.includes('/2025-09-01/'))).toBe(true);
+    expect(urls.some(u => u.includes('/2026-06-01/'))).toBe(false);
+  });
+
+  it('rend une liste vide plutôt qu’une attribution fausse', async () => {
+    const fetchFn = vi.fn().mockImplementation(async (url: string) => (
+      url === LISTING_URL
+        ? { ok: true, status: 200, text: async () => listing('2026-06-01') }
+        : { ok: false, status: 404 }
+    )) as unknown as typeof fetch;
+
+    // Aucun millésime de 2019 dans le dépôt : on ne sert rien.
+    expect(await downloadPiscinesForYear('49007', '2019', fetchFn)).toEqual([]);
+  });
+
+  it('n’échoue jamais : un complément raté laisse les bâtiments utilisables', async () => {
+    const fetchFn = vi.fn().mockRejectedValue(new Error('réseau')) as unknown as typeof fetch;
+
+    await expect(downloadPiscinesForYear('49007', '2026', fetchFn)).resolves.toEqual([]);
   });
 });

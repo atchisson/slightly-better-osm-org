@@ -117,6 +117,37 @@ async function downloadPiscines(
   }
 }
 
+/**
+ * Piscines seules, pour une commune dont les bâtiments sont déjà en cache.
+ *
+ * Existe à cause d'un défaut introduit avec la prise en charge des piscines : le champ
+ * a été rendu optionnel dans le cache pour ne pas périmer des dizaines de mégaoctets
+ * déjà téléchargés, si bien qu'une entrée antérieure rendait zéro piscine — en
+ * silence, et donc pour tout utilisateur de la version précédente. Ce complément
+ * comble l'entrée au premier usage, au prix d'une seule requête sur un fichier léger.
+ *
+ * **On ne prend que les millésimes de la même ANNÉE que les bâtiments en cache.**
+ * L'attribution portée par chaque objet créé est une année : servir des piscines de
+ * 2026 sous une attribution 2025 serait une attribution fausse, et la Licence Ouverte
+ * ne s'en accommode pas. Si aucun millésime ne correspond, on rend une liste vide.
+ */
+export async function downloadPiscinesForYear(
+  insee: string,
+  annee: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<unknown[]> {
+  try {
+    const millesimes = (await fetchMillesimes(fetchFn)).filter(d => d.startsWith(`${annee}-`));
+    if (millesimes.length === 0) return [];
+    const codes = arrondissementCodes(insee);
+    const parts = await Promise.all(
+      codes.map(code => downloadPiscines(code, millesimes[0]!, fetchFn)));
+    return parts.flat();
+  } catch {
+    return [];
+  }
+}
+
 async function downloadOne(
   insee: string,
   millesime: string,
