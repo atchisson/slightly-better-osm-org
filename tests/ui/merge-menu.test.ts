@@ -83,12 +83,15 @@ describe('fusionnerSelection', () => {
 });
 
 describe('attachMergeMenu', () => {
+  /** Un menu contextuel d'iD : des boutons à icône, sans libellé. */
   const ouvrirMenu = () => {
     const menu = document.createElement('div');
     menu.className = 'edit-menu';
     const modele = document.createElement('button');
     modele.className = 'edit-menu-item';
     modele.id = 'un-id-d-iD';
+    modele.innerHTML =
+      '<svg class="icon"><use id="autre-id" href="#iD-operation-delete"></use></svg>';
     menu.appendChild(modele);
     document.body.appendChild(menu);
     menuCb?.({ menu, modele });
@@ -104,9 +107,40 @@ describe('attachMergeMenu', () => {
     const ajoute = menu.lastElementChild as HTMLElement;
     expect(ajoute.tagName).toBe('BUTTON');
     expect(ajoute.className).toBe('edit-menu-item');
-    expect(ajoute.textContent).toBe(LIBELLE);
-    // L'id du voisin ne doit pas être dupliqué : il casserait le getElementById d'iD.
+    // Aucun id dupliqué, ni sur l'élément ni dans sa descendance : ils casseraient
+    // le getElementById d'iD sur ses propres éléments.
     expect(ajoute.id).toBe('');
+    expect(ajoute.querySelectorAll('[id]')).toHaveLength(0);
+  });
+
+  it('garde une icône et met le libellé en infobulle', () => {
+    // Le menu contextuel d'iD est une colonne d'icônes. Un premier essai y posait du
+    // texte : l'entrée débordait de la colonne et se faisait couper.
+    selection = [gauche, droite];
+    attachMergeMenu(fauxBridge(), { notify: () => {} });
+
+    const ajoute = ouvrirMenu().lastElementChild as HTMLElement;
+
+    expect(ajoute.textContent?.trim()).toBe('');
+    expect(ajoute.title).toBe(LIBELLE);
+    expect(ajoute.getAttribute('aria-label')).toBe(LIBELLE);
+    const use = ajoute.querySelector('use');
+    expect(use?.getAttribute('href')).toBe('#iD-operation-merge');
+  });
+
+  it('n’hérite pas d’un voisin désactivé', () => {
+    selection = [gauche, droite];
+    attachMergeMenu(fauxBridge(), { notify: () => {} });
+    const menu = document.createElement('div');
+    menu.className = 'edit-menu';
+    const modele = document.createElement('button');
+    modele.className = 'edit-menu-item disabled';
+    modele.innerHTML = '<svg><use href="#x"></use></svg>';
+    menu.appendChild(modele);
+    document.body.appendChild(menu);
+    menuCb?.({ menu, modele });
+
+    expect((menu.lastElementChild as HTMLElement).classList.contains('disabled')).toBe(false);
   });
 
   it('ne s’ajoute pas quand la sélection n’est pas deux bâtiments', () => {

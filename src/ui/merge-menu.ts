@@ -9,6 +9,16 @@ export interface MergeMenuHooks {
 
 export const LIBELLE = 'Fusionner (cadastre-id)';
 
+/**
+ * Icône empruntée à l'opération « Combiner » d'iD.
+ *
+ * Toutes ses opérations suivent la convention `#iD-operation-{id}` et `merge` en est
+ * une : l'icône existe donc dans sa feuille de symboles. C'est aussi la plus juste
+ * sémantiquement — notre fusion fait ce que « Combiner » ferait si iD savait produire
+ * une voie unique au lieu d'un multipolygone.
+ */
+const ICONE = '#iD-operation-merge';
+
 const REFUS: Record<string, string> = {
   'pas-deux': 'Sélectionnez exactement deux bâtiments pour les fusionner.',
   'pas-mitoyens': 'Ces deux bâtiments ne se touchent pas : la fusion donnerait deux morceaux séparés.',
@@ -43,11 +53,14 @@ export function fusionnerSelection(bridge: IdBridge): string | null {
 /**
  * Greffe « Fusionner » dans le menu contextuel d'iD, à chaque ouverture.
  *
- * L'entrée est **clonée sur un voisin** : même balise, mêmes classes, donc même
- * apparence et même comportement de survol que les opérations natives, sans qu'une
- * seule règle CSS d'iD soit reproduite ici. C'est la leçon du bouton de barre
- * d'outils, où copier une classe et laisser iD peindre avait produit une pastille
- * blanche au milieu d'une barre sombre.
+ * L'entrée est **clonée en profondeur sur un voisin** : même balise, mêmes classes,
+ * et surtout même structure interne — le menu contextuel d'iD est une colonne
+ * d'icônes, pas une liste de libellés. Un premier essai clonait superficiellement et
+ * posait du texte : l'entrée débordait de la colonne et se faisait couper. On ne
+ * remplace donc que la cible de l'icône, et le libellé passe en infobulle.
+ *
+ * Même leçon que le bouton de barre d'outils : imiter un voisin, jamais reproduire
+ * les règles d'iD ni supposer la forme de ses éléments.
  *
  * @returns de quoi se détacher.
  */
@@ -57,10 +70,27 @@ export function attachMergeMenu(bridge: IdBridge, hooks: MergeMenuHooks): () => 
     // contextuel d'iD sert à bien d'autres choses.
     if (bridge.selectedBuildings().length !== 2) return;
 
-    const item = modele.cloneNode(false) as HTMLElement;
+    const item = modele.cloneNode(true) as HTMLElement;
+    // Les identifiants du voisin ne doivent pas être dupliqués : ils casseraient le
+    // getElementById d'iD sur ses propres éléments.
     item.removeAttribute('id');
-    item.textContent = LIBELLE;
+    for (const el of item.querySelectorAll('[id]')) el.removeAttribute('id');
+    // Un voisin désactivé au moment du clonage nous transmettrait son état.
+    item.classList.remove('disabled');
+
+    // On ne garde que l'icône du modèle, dont on change la cible. Vider puis remettre
+    // supprime au passage tout libellé que le voisin porterait.
+    const icone = item.querySelector('svg');
+    item.textContent = '';
+    if (icone) {
+      for (const use of icone.querySelectorAll('use')) {
+        use.setAttribute('href', ICONE);
+        use.setAttribute('xlink:href', ICONE);
+      }
+      item.appendChild(icone);
+    }
     item.title = LIBELLE;
+    item.setAttribute('aria-label', LIBELLE);
     item.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
