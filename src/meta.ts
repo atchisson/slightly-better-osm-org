@@ -5,6 +5,7 @@ export const USERSCRIPT_META = `// ==UserScript==
 // @match        https://www.openstreetmap.org/edit*
 // @match        https://www.openstreetmap.org/id*
 // @run-at       document-start
+// @license      ISC
 // @grant        none
 // @version      0.1.0
 // ==/UserScript==
