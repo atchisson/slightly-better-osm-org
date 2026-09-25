@@ -208,6 +208,52 @@ Ce choix a été fait en connaissance du risque : 16 % des constructions légèr
    - `02` : l'ancre est le propriétaire de sa composante. Sans propriétaire, l'ancre est la composante elle-même (construction légère isolée).
 3. Absorber toutes les composantes légères dont le propriétaire est l'ancre.
 4. Union géométrique de l'ancre et des composantes absorbées.
+
+   > **Corrigé le 2026-09-25, sur constat à l'écran.** « Il ne devrait pas y avoir de
+   > ligne en haut du bâtiment clair » : le contour rendu retraçait le mur mitoyen au
+   > lieu de le border. La spec posait que « le PCI est topologiquement propre : deux
+   > bâtiments mitoyens partagent des sommets exacts », et toute l'union exacte par
+   > annulation d'arêtes repose là-dessus. **C'est faux dans 10 % des compositions
+   > absorbantes.**
+   >
+   > Deux ruptures distinctes, mesurées sur deux communes entières (28404 : 6 271
+   > polygones ; Angers : 50 740) :
+   >
+   > - **Murs partagés en partie seulement.** Un léger adossé au MILIEU du mur d'un dur
+   >   ne partage pas une arête avec lui, mais un bout d'arête : `A→B` et `P→Q` avec P
+   >   et Q strictement entre A et B. Rien ne s'annule. Corrigé par une passe de nodage
+   >   qui découpe chaque arête aux sommets des AUTRES membres — sans jamais introduire
+   >   de coordonnée nouvelle, donc sans rien perdre de l'exactitude. Tolérance : 2 cm,
+   >   posée dans le creux d'une distribution bimodale (≤ 20 mm : 975 cas à Angers ;
+   >   ]20 ; 50] mm : 22 ; > 50 mm : 2 599). Une première version à 1 mm, « par
+   >   prudence », ratait le cas qui a motivé le correctif — son sommet est à 4,4 mm.
+   >   La prudence ne se décrète pas, elle se mesure.
+   > - **Chevauchements francs.** Polygones 941 et 1015 de 28404 : un sommet du léger
+   >   tombe 4,6 m à l'intérieur du dur. Aucune annulation d'arêtes ne peut répondre à
+   >   ça ; il faudrait un vrai découpage avec calcul d'intersections. On refuse, avec
+   >   un motif propre (`chevauchement`), en vérifiant le RÉSULTAT : chaque arête du
+   >   contour doit avoir du bâti d'un seul côté. Sonde à 10 cm, au-dessus de la
+   >   tolérance de simplification — à 2 cm, une arête qui saute un sommet quasi
+   >   colinéaire se dénonçait à tort (48 faux positifs contre 18 cas réels).
+   >
+   > Résultat, contours traversés par un mur intérieur :
+   >
+   > | commune | avant | après |
+   > |---------|-------|-------|
+   > | 28404   |    36 |     0 |
+   > | Angers  |   702 |     0 |
+   >
+   > Et 73 compositions de plus aboutissent à Angers (7 064 → 7 137) : des unions qui
+   > échouaient faute de nodage. Le correctif ne fait pas que retirer des contours
+   > faux, il en rend des justes.
+   >
+   > Deux fausses pistes, écartées par la mesure et consignées pour qu'on ne les
+   > reprenne pas : l'**invariant d'aire** (l'union vaut la somme des parties) ne voit
+   > rien, un éperon qui retrace un mur ayant une aire nulle — écart relatif médian des
+   > cas fautifs 6,6e-6, contre 0 pour les cas sains. Et le test **sommet-dans-polygone**
+   > échoue dans les deux sens, `pointInRing` n'étant pas fiable sur le bord : il
+   > n'attrapait qu'un cas sur dix-huit tout en refusant une fixture saine.
+
 5. Si l'union produit un trou ou plusieurs parties : refus, avec message.
 6. Supprimer les sommets colinéaires apparus aux coutures, puis simplifier (Douglas-Peucker, coefficient réglable, défaut à caler pendant l'implémentation). **Les deux passes doivent borner leur erreur** : tout sommet supprimé reste à moins de la tolérance du contour retenu. C'est une garantie que seul un algorithme global comme Douglas-Peucker apporte ; un test de proximité local, appliqué en cascade, laisse l'erreur se composer. Mesuré le 2026-09-23 : une première implémentation locale déplaçait des contours réels jusqu'à 7,27 m avec une tolérance de 2 cm. **Un sommet partagé avec un polygone cadastre non membre de l'union est inamovible** : les deux passes le conservent, quelle que soit sa colinéarité.
 

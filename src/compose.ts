@@ -23,7 +23,7 @@ export interface ComposeInput {
 
 export type RefusalReason =
   | 'aucun-batiment' | 'trou-source' | 'degenere'
-  | 'pincement' | 'trou' | 'parties-multiples' | 'vide';
+  | 'pincement' | 'trou' | 'parties-multiples' | 'vide' | 'chevauchement';
 
 export type Composition =
   | { ok: true; ring: Ring; anchorId: number; absorbed: number[]; isolatedLight: boolean }

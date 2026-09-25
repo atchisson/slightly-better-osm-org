@@ -1,6 +1,6 @@
 import type { LonLat, Poly, Ring } from './types';
 
-const METRES_PAR_DEGRE_LAT = 111320;
+export const METRES_PAR_DEGRE_LAT = 111320;
 
 const vertexKey = (p: LonLat): string => `${p[0]},${p[1]}`;
 
