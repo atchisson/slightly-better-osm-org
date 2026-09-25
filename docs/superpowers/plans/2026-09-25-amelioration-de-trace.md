@@ -218,8 +218,24 @@ difficile à repérer qu'un doublon. À proposer comme option, une fois le mode 
 `src/improve/mode.ts` (contrôleur, 8 tests), marque d'aperçu dans
 `src/ui/overlay.ts`, `selectedWays()` dans le bridge. Aucun objet n'est modifié.
 
-La cible décide du geste — un sommet se déplace, un segment reçoit un nœud — de
-sorte qu'aucun second modificateur ne soit à mémoriser. **L'étape 4, la
+> **Corrigé le 2026-09-25, sur constat d'usage.** La première version faisait
+> décider la PROXIMITÉ : un sommet à moins de douze pixels se déplaçait, sinon un
+> nœud s'insérait. Deux gestes en devenaient impossibles. Déplacer un sommet de
+> plus d'un mètre, d'abord : le clic sert aussi de destination, donc le seuil de
+> capture bornait le déplacement à ce même seuil — alors qu'une route décalée de
+> dix mètres est le cas courant, pas l'exception. Et insérer un nœud près d'un
+> sommet existant, ensuite, puisque le sommet gagnait toujours.
+>
+> Le modèle de JOSM est le bon : « a standard click moves the nearest node to the
+> cursor position ». Le sommet le plus proche vient au curseur, **sans seuil**, et
+> l'intention d'insérer se déclare — `Maj` maintenue, `Ctrl` étant déjà pris par
+> l'armement. L'aperçu montre désormais le TRACÉ résultant et non la seule marque :
+> à dix mètres de distance, une marque posée sur le point de départ ne dit plus
+> rien de la forme obtenue. JOSM fait de même (« dashed red line - indicates a way
+> after moved node »).
+
+Le geste par défaut déplace le sommet le plus proche vers le curseur ; `Maj`
+bascule vers l'insertion d'un nœud dans le segment le plus proche. **L'étape 4, la
 suppression, n'est pas livrée** : elle n'a pas été demandée, et sa règle de
 sûreté (refuser un nœud partagé ou tagué) repose sur `graph.parentWays`, une
 primitive d'iD non vérifiée. La livrer sans elle reviendrait à casser des

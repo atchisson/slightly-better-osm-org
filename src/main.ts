@@ -98,6 +98,12 @@ void (async () => {
   // peut différer de celle de la surface. On mesure donc l'origine de `surface`
   // elle-même via getBoundingClientRect() et on convertit depuis les coordonnées
   // écran absolues (clientX/clientY), qui elles ne dépendent jamais de la cible.
+  // Le geste par défaut DÉPLACE le sommet le plus proche vers le curseur, sans seuil
+  // de distance : un tracé décalé de dix mètres est le cas courant. Maj bascule vers
+  // l'insertion — l'intention se déclare, elle ne se devine pas de la proximité.
+  const intentionDe = (e: MouseEvent): 'deplacer' | 'inserer' =>
+    e.shiftKey ? 'inserer' : 'deplacer';
+
   const ecranRelatif = (e: MouseEvent): [number, number] => {
     const rect = surface.getBoundingClientRect();
     return [e.clientX - rect.left, e.clientY - rect.top];
@@ -121,6 +127,8 @@ void (async () => {
     project: p => bridge.project(p),
     showTarget: (loc, kind, partage) => cibleOverlay.showTarget(loc, kind, partage),
     hideTarget: () => cibleOverlay.hideTarget(),
+    showPreview: ring => cibleOverlay.show(ring, 'ok'),
+    hidePreview: () => cibleOverlay.hide(),
     moveNode: (id, loc) => bridge.moveNode(id, loc),
     insertNodeOnEdge: (edge, loc) => bridge.insertNodeOnEdge(edge, loc),
     nodeIsShared: id => bridge.nodeIsShared(id),
@@ -141,7 +149,8 @@ void (async () => {
     // (0,15 ms mesurées) — à chaque événement, ça finit par se voir.
     cancelAnimationFrame(frame);
     frame = requestAnimationFrame(() => {
-      if (improve.isEnabled()) improve.hoverAt(ecranRelatif(ev));
+      // Maj maintenue : insérer un nœud plutôt que déplacer le plus proche.
+      if (improve.isEnabled()) improve.hoverAt(ecranRelatif(ev), intentionDe(ev));
       if (mode.isEnabled()) mode.hoverAt(toLonLat(ev));
     });
   });
@@ -160,7 +169,7 @@ void (async () => {
     const ev = e as MouseEvent;
     // La visée passe avant : les deux modes s'excluent par la couche affichée, mais
     // l'ordre reste explicite plutôt que dépendant de cette exclusion.
-    if (improve.isEnabled() && improve.clickAt(ecranRelatif(ev))) {
+    if (improve.isEnabled() && improve.clickAt(ecranRelatif(ev), intentionDe(ev))) {
       // iD traiterait le même clic comme une sélection et désélectionnerait la voie
       // qu'on est en train de préciser.
       ev.preventDefault();
@@ -219,5 +228,5 @@ void (async () => {
 
   // Sans bouton, cette ligne est la seule chose qui dise comment déclencher le
   // greffon. Elle nomme donc le geste, pas seulement son état.
-  log('prêt — Ctrl sur fond cadastre : créer un bâtiment ; Ctrl hors fond cadastre avec une voie sélectionnée : viser un sommet ou un segment ; deux bâtiments sélectionnés : clic droit « Fusionner », ou Alt+F');
+  log('prêt — Ctrl sur fond cadastre : créer un bâtiment ou une piscine ; Ctrl hors fond cadastre, une voie sélectionnée : déplacer le sommet le plus proche vers le curseur (Maj : insérer un nœud) ; deux bâtiments sélectionnés : clic droit « Fusionner en une seule voie », ou Alt+F');
 })();

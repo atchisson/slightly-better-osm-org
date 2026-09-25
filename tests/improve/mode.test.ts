@@ -17,6 +17,7 @@ let caches: number;
 let deplaces: { id: string; loc: LonLat }[];
 let inseres: { edge: [string, string]; loc: LonLat }[];
 let partageRendu: boolean | null;
+let apercus: unknown[];
 
 const hooks = (): ImproveHooks => ({
   selectedWays: () => selection,
@@ -24,6 +25,8 @@ const hooks = (): ImproveHooks => ({
   invert: (e) => [e[0] / 1000, -e[1] / 1000],
   showTarget: (loc, kind, partage) => { montres.push({ loc, kind, partage }); },
   hideTarget: () => { caches++; },
+  showPreview: (ring) => { apercus.push(ring); },
+  hidePreview: () => {},
   moveNode: (id, loc) => { deplaces.push({ id, loc }); },
   insertNodeOnEdge: (edge, loc) => { inseres.push({ edge, loc }); },
   nodeIsShared: () => partageRendu,
@@ -36,6 +39,7 @@ beforeEach(() => {
   deplaces = [];
   inseres = [];
   partageRendu = null;
+  apercus = [];
 });
 
 describe('createImproveMode', () => {
@@ -48,7 +52,7 @@ describe('createImproveMode', () => {
     expect(m.cible()).toBeNull();
   });
 
-  it('montre le sommet visé une fois armé', () => {
+  it('montre le sommet visé, et le tracé qui en résulterait', () => {
     const m = createImproveMode(hooks());
     m.enable();
 
@@ -57,13 +61,16 @@ describe('createImproveMode', () => {
     expect(montres).toHaveLength(1);
     expect(montres[0]!.kind).toBe('noeud');
     expect(m.cible()?.kind).toBe('noeud');
+    // À dix mètres de distance, une marque posée sur le sommet de départ ne dit plus
+    // rien de la forme obtenue : l'aperçu du tracé est indispensable.
+    expect(apercus).toHaveLength(1);
   });
 
-  it('montre le point d’insertion sur un segment', () => {
+  it('montre le point d’insertion quand l’intention est d’insérer', () => {
     const m = createImproveMode(hooks());
     m.enable();
 
-    m.hoverAt([50, 2]);
+    m.hoverAt([50, 2], 'inserer');
 
     expect(montres[0]!.kind).toBe('segment');
   });
@@ -95,26 +102,15 @@ describe('createImproveMode', () => {
     expect(montres).toEqual([]);
   });
 
-  it('oublie sa cible quand le curseur s’éloigne', () => {
-    const m = createImproveMode(hooks());
-    m.enable();
-    m.hoverAt([100, 0]);
-
-    m.hoverAt([500, 500]);
-
-    expect(m.cible()).toBeNull();
-    expect(caches).toBe(1);
-  });
-
-  it('n’efface pas deux fois de suite', () => {
-    // `hideTarget` redessine : l'appeler à chaque mouvement hors de portée ferait
-    // travailler l'overlay pour rien, soixante fois par seconde.
+  it('garde une cible même loin de la voie', () => {
+    // Sans seuil : le curseur est la DESTINATION, et un tracé décalé de dix mètres
+    // est le cas courant.
     const m = createImproveMode(hooks());
     m.enable();
 
-    m.hoverAt([500, 500]);
-    m.hoverAt([600, 600]);
+    m.hoverAt([900, 900]);
 
+    expect(m.cible()?.kind).toBe('noeud');
     expect(caches).toBe(0);
   });
 
@@ -134,12 +130,12 @@ describe('createImproveMode', () => {
     const m = createImproveMode(hooks());
     m.enable();
 
-    // Curseur à 8 px du coin B : la cible est B, mais la destination est le curseur.
-    expect(m.clickAt([108, 0])).toBe(true);
+    // Curseur très loin de B : c'est tout l'intérêt, le sommet vient au curseur.
+    expect(m.clickAt([180, 0])).toBe(true);
 
     expect(deplaces).toHaveLength(1);
     expect(deplaces[0]!.id).toBe('nB');
-    expect(deplaces[0]!.loc[0]).toBeCloseTo(0.108, 12);
+    expect(deplaces[0]!.loc[0]).toBeCloseTo(0.18, 12);
     expect(inseres).toEqual([]);
   });
 
@@ -147,7 +143,7 @@ describe('createImproveMode', () => {
     const m = createImproveMode(hooks());
     m.enable();
 
-    expect(m.clickAt([50, 2])).toBe(true);
+    expect(m.clickAt([50, 2], 'inserer')).toBe(true);
 
     expect(inseres).toHaveLength(1);
     expect(inseres[0]!.edge).toEqual(['nA', 'nB']);
@@ -157,7 +153,8 @@ describe('createImproveMode', () => {
     expect(deplaces).toEqual([]);
   });
 
-  it('ne fait rien, et le dit, quand rien n’est visé', () => {
+  it('ne fait rien, et le dit, quand aucune voie n’est sélectionnée', () => {
+    selection = [];
     const m = createImproveMode(hooks());
     m.enable();
 
@@ -170,7 +167,7 @@ describe('createImproveMode', () => {
   it('ne fait rien tant qu’il n’est pas armé', () => {
     const m = createImproveMode(hooks());
 
-    expect(m.clickAt([108, 0])).toBe(false);
+    expect(m.clickAt([180, 0])).toBe(false);
     expect(deplaces).toEqual([]);
   });
 
