@@ -59,13 +59,20 @@ if (tag && !/^\d+(\.\d+)*$/.test(tag)) {
   );
 }
 
-const bannerVersionne = meta.replace(
-  /(\/\/ @version\s+)(\S+)/,
-  (_, prefixe, version) => `${prefixe}${tag || `${version}.${stamp}`}`
-);
-if (bannerVersionne === meta) {
+// La présence de la ligne se teste EXPLICITEMENT, jamais en comparant le texte avant
+// et après. La version précédente déduisait son absence d'un remplacement sans effet
+// — or un remplacement peut très bien produire un texte identique : c'est le cas dès
+// que le tag vaut déjà le numéro écrit dans `src/meta.ts`, donc précisément pour la
+// première release (`v0.1.0` sur un bandeau qui porte `0.1.0`). La release échouait
+// alors sur une erreur qui accusait le bandeau d'être malformé.
+const RE_VERSION = /(\/\/ @version\s+)(\S+)/;
+if (!RE_VERSION.test(meta)) {
   throw new Error("esbuild.config.mjs : aucune ligne @version trouvée dans le bandeau de src/meta.ts.");
 }
+const bannerVersionne = meta.replace(
+  RE_VERSION,
+  (_, prefixe, version) => `${prefixe}${tag || `${version}.${stamp}`}`
+);
 
 await build({
   entryPoints: ['src/main.ts'],
