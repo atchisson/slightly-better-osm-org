@@ -1,8 +1,15 @@
 import { topologicalUnion, ringArea } from './geometry/union';
 import type { LonLat, Poly, Ring } from './geometry/types';
 
-/** Un bâtiment OSM tel que le bridge le rend pour une fusion. */
-export interface OsmBuilding {
+/**
+ * Une voie OSM telle que le bridge la rend.
+ *
+ * Nommée `OsmWay` et non `OsmBuilding` : la fusion ne s'intéresse qu'aux bâtiments,
+ * mais l'amélioration de tracé vise n'importe quelle voie, et les deux lisent la
+ * sélection par le même chemin. Un anneau fermé répète son premier sommet ; une ligne
+ * ouverte, non.
+ */
+export interface OsmWay {
   id: string;
   /** anneau fermé : premier sommet === dernier */
   ring: Ring;
@@ -34,7 +41,7 @@ export type MergePlan =
 
 const vertexKey = (p: LonLat): string => `${p[0]},${p[1]}`;
 
-const enPoly = (b: OsmBuilding, id: number): Poly =>
+const enPoly = (b: OsmWay, id: number): Poly =>
   ({ id, type: '01', outer: b.ring, holes: [] });
 
 /**
@@ -69,7 +76,7 @@ const enPoly = (b: OsmBuilding, id: number): Poly =>
  * proviennent des entrées, donc chacun a déjà son nœud OSM — la fusion ne crée aucun
  * nœud et n'en déplace aucun.
  */
-export function planMerge(batiments: OsmBuilding[]): MergePlan {
+export function planMerge(batiments: OsmWay[]): MergePlan {
   if (batiments.length !== 2) return { ok: false, reason: 'pas-deux' };
 
   for (const b of batiments) {
@@ -78,7 +85,7 @@ export function planMerge(batiments: OsmBuilding[]): MergePlan {
     }
   }
 
-  const [a, b] = batiments as [OsmBuilding, OsmBuilding];
+  const [a, b] = batiments as [OsmWay, OsmWay];
 
   // La plus grande est conservée ; en cas d'égalité stricte, la première, pour que le
   // résultat ne dépende pas de l'ordre de sélection.

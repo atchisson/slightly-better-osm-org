@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { planMerge } from '../src/merge';
-import type { OsmBuilding } from '../src/merge';
+import type { OsmWay } from '../src/merge';
 
 const M = 1 / 111320;   // ~1 m en latitude
 
@@ -10,7 +10,7 @@ const rect = (
   x0: number, y0: number, x1: number, y1: number,
   noms: string[],
   tags: Record<string, string> = { building: 'yes' },
-): OsmBuilding => ({
+): OsmWay => ({
   id,
   ring: [[x0 * M, y0 * M], [x1 * M, y0 * M], [x1 * M, y1 * M], [x0 * M, y1 * M], [x0 * M, y0 * M]],
   nodeIds: [...noms, noms[0]!],
@@ -20,7 +20,7 @@ const rect = (
 // Deux moitiés d'un même bâtiment, séparées par une limite de parcelle : le mur
 // commun x=10 porte les mêmes nœuds des deux côtés, comme après un import cadastre.
 const gauche = rect('w1', 0, 0, 10, 8, ['nA', 'nB', 'nC', 'nD']);
-const droite: OsmBuilding = {
+const droite: OsmWay = {
   id: 'w2',
   ring: [[10 * M, 0], [20 * M, 0], [20 * M, 8 * M], [10 * M, 8 * M], [10 * M, 0]],
   nodeIds: ['nB', 'nE', 'nF', 'nC', 'nB'],
@@ -45,7 +45,7 @@ describe('planMerge', () => {
     // conservée survivent à la fusion — ce qu'une création suivie de deux
     // suppressions détruirait.
     const petit = rect('petit', 0, 0, 10, 8, ['nA', 'nB', 'nC', 'nD']);
-    const grand: OsmBuilding = { ...droite, id: 'grand', ring: [
+    const grand: OsmWay = { ...droite, id: 'grand', ring: [
       [10 * M, 0], [40 * M, 0], [40 * M, 8 * M], [10 * M, 8 * M], [10 * M, 0]] };
 
     expect((planMerge([petit, grand]) as { keepId: string }).keepId).toBe('grand');
@@ -62,7 +62,7 @@ describe('planMerge', () => {
   });
 
   it('refuse deux bâtiments qui ne se touchent pas', () => {
-    const loin: OsmBuilding = { ...droite, id: 'w3', ring: [
+    const loin: OsmWay = { ...droite, id: 'w3', ring: [
       [50 * M, 0], [60 * M, 0], [60 * M, 8 * M], [50 * M, 8 * M], [50 * M, 0]],
       nodeIds: ['nX', 'nY', 'nZ', 'nW', 'nX'] };
 
@@ -80,7 +80,7 @@ describe('planMerge', () => {
   });
 
   it('refuse une géométrie dont les nœuds ne suivent pas l’anneau', () => {
-    const casse: OsmBuilding = { ...droite, nodeIds: ['nB', 'nE'] };
+    const casse: OsmWay = { ...droite, nodeIds: ['nB', 'nE'] };
 
     expect((planMerge([gauche, casse]) as { reason: string }).reason).toBe('geometrie-illisible');
   });
@@ -88,7 +88,7 @@ describe('planMerge', () => {
   it('réunit les tags et signale ceux qui divergeaient', () => {
     const a = rect('w1', 0, 0, 10, 8, ['nA', 'nB', 'nC', 'nD'],
       { building: 'house', 'addr:housenumber': '12' });
-    const b: OsmBuilding = { ...droite, tags: { building: 'yes', roof: 'gabled' } };
+    const b: OsmWay = { ...droite, tags: { building: 'yes', roof: 'gabled' } };
 
     const p = planMerge([a, b]);
 

@@ -1,7 +1,7 @@
 import type { IdBridge } from './types';
 import type { ExistingBuilding } from '../conflation/overlap';
 import type { ExistingNode, Insertion } from '../conflation/snap';
-import type { MergePlan, OsmBuilding } from '../merge';
+import type { MergePlan, OsmWay } from '../merge';
 import type { LonLat, Ring } from '../geometry/types';
 
 // `storage` ne figure PAS ici : il n'existe plus sur le contexte (spike du 2026-09-23).
@@ -654,7 +654,7 @@ function buildBridge(c: any): IdBridge {
       return container;
     },
 
-    selectedBuildings(): OsmBuilding[] {
+    selectedBuildings(): OsmWay[] {
       // `selectedIDs` n'a pas été vérifié par le spike. Deux formes connues d'iD sont
       // tentées, puis on renonce proprement : une sélection illisible ne doit jamais
       // faire échouer quoi que ce soit, seulement priver l'utilisateur de l'option.
@@ -669,7 +669,7 @@ function buildBridge(c: any): IdBridge {
         if (!Array.isArray(bruts)) return [];
 
         const graph = c.graph();
-        const out: OsmBuilding[] = [];
+        const out: OsmWay[] = [];
         for (const id of bruts as string[]) {
           const e = graph.entity(id) as {
             type?: string; nodes?: string[]; tags?: Record<string, string>;
@@ -679,6 +679,39 @@ function buildBridge(c: any): IdBridge {
           // Voie FERMÉE seulement : fusionner deux lignes ouvertes n'a pas de sens ici,
           // et `topologicalUnion` suppose des anneaux.
           if (e.nodes.length < 4 || e.nodes[0] !== e.nodes[e.nodes.length - 1]) return [];
+          out.push({
+            id,
+            ring: e.nodes.map(n => graph.entity(n).loc as LonLat),
+            nodeIds: [...e.nodes],
+            tags: { ...(e.tags ?? {}) },
+          });
+        }
+        return out;
+      } catch {
+        return [];
+      }
+    },
+
+    selectedWays(): OsmWay[] {
+      try {
+        const ctx = c as {
+          selectedIDs?: () => unknown;
+          mode?: () => { selectedIDs?: () => unknown } | undefined;
+        };
+        const bruts = typeof ctx.selectedIDs === 'function'
+          ? ctx.selectedIDs()
+          : ctx.mode?.()?.selectedIDs?.();
+        if (!Array.isArray(bruts)) return [];
+
+        const graph = c.graph();
+        const out: OsmWay[] = [];
+        for (const id of bruts as string[]) {
+          const e = graph.entity(id) as {
+            type?: string; nodes?: string[]; tags?: Record<string, string>;
+          };
+          // Aucun filtre sur les tags ni sur la fermeture : préciser le tracé d'une
+          // haie ou d'un chemin est aussi légitime que celui d'un bâtiment.
+          if (e?.type !== 'way' || !Array.isArray(e.nodes) || e.nodes.length < 2) return [];
           out.push({
             id,
             ring: e.nodes.map(n => graph.entity(n).loc as LonLat),

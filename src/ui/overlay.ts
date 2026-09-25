@@ -1,5 +1,5 @@
 import type { IdBridge } from '../bridge/types';
-import type { Ring } from '../geometry/types';
+import type { LonLat, Ring } from '../geometry/types';
 
 const NS = 'http://www.w3.org/2000/svg';
 
@@ -26,6 +26,16 @@ const NS = 'http://www.w3.org/2000/svg';
 export interface Overlay {
   show(ring: Ring, state: 'ok' | 'refus'): void;
   hide(): void;
+  /**
+   * Marque ce que le curseur vise sur une voie, pour le mode d'amélioration de tracé.
+   *
+   * Un cercle plein sur un sommet — ce qu'un clic déplacerait — et un cercle creux sur
+   * un segment — là où un clic insérerait un nœud. La distinction doit se voir sans
+   * lire de légende : c'est elle qui dit ce que le geste va faire, avant qu'il ne soit
+   * fait.
+   */
+  showTarget(loc: LonLat, kind: 'noeud' | 'segment'): void;
+  hideTarget(): void;
   redraw(): void;
   destroy(): void;
 }
@@ -42,6 +52,13 @@ export function createOverlay(bridge: IdBridge): Overlay {
   path.setAttribute('stroke', '#2e7dd7');
   path.setAttribute('stroke-width', '2');
   svg.appendChild(path);
+
+  const marque = document.createElementNS(NS, 'circle');
+  marque.setAttribute('r', '6');
+  marque.setAttribute('stroke', '#2e7dd7');
+  marque.setAttribute('stroke-width', '2');
+  marque.setAttribute('visibility', 'hidden');
+  svg.appendChild(marque);
 
   // Attaché à `surfaceNode()` — l'élément dont le coin EST l'origine de `project()` —
   // et jamais au conteneur d'iD, qui inclut la barre d'outils et le panneau latéral.
@@ -66,8 +83,21 @@ export function createOverlay(bridge: IdBridge): Overlay {
   // de carte (draw), jamais mémorisé en coordonnées écran — sinon un pan ou un zoom
   // laisserait le contour affiché à l'ancienne position.
   let current: Ring | null = null;
+  let cible: { loc: LonLat; kind: 'noeud' | 'segment' } | null = null;
+
+  const drawTarget = (): void => {
+    if (!cible) { marque.setAttribute('visibility', 'hidden'); return; }
+    const [x, y] = bridge.project(cible.loc);
+    marque.setAttribute('cx', String(x));
+    marque.setAttribute('cy', String(y));
+    // Plein pour un sommet existant, creux pour un point d'insertion : la forme dit
+    // si le clic déplacera quelque chose ou en ajoutera.
+    marque.setAttribute('fill', cible.kind === 'noeud' ? '#2e7dd7' : 'rgba(255,255,255,0.85)');
+    marque.setAttribute('visibility', 'visible');
+  };
 
   const draw = (): void => {
+    drawTarget();
     if (!current) { path.setAttribute('d', ''); return; }
     const d = current
       .map((p, i) => {
@@ -96,6 +126,8 @@ export function createOverlay(bridge: IdBridge): Overlay {
       draw();
     },
     hide() { current = null; draw(); },
+    showTarget(loc, kind) { cible = { loc, kind }; drawTarget(); },
+    hideTarget() { cible = null; drawTarget(); },
     redraw: draw,
     destroy() { stopListening(); svg.remove(); },
   };

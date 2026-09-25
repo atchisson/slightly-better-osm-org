@@ -2,24 +2,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { attachMergeMenu, fusionnerSelection, LIBELLE } from '../../src/ui/merge-menu';
 import type { IdBridge } from '../../src/bridge/types';
-import type { OsmBuilding } from '../../src/merge';
+import type { OsmWay } from '../../src/merge';
 
 const M = 1 / 111320;
 
-const gauche: OsmBuilding = {
+const gauche: OsmWay = {
   id: 'w1',
   ring: [[0, 0], [10 * M, 0], [10 * M, 8 * M], [0, 8 * M], [0, 0]],
   nodeIds: ['nA', 'nB', 'nC', 'nD', 'nA'],
   tags: { building: 'yes' },
 };
-const droite: OsmBuilding = {
+const droite: OsmWay = {
   id: 'w2',
   ring: [[10 * M, 0], [20 * M, 0], [20 * M, 8 * M], [10 * M, 8 * M], [10 * M, 0]],
   nodeIds: ['nB', 'nE', 'nF', 'nC', 'nB'],
   tags: { building: 'yes' },
 };
 
-let selection: OsmBuilding[];
+let selection: OsmWay[];
 let fusions: unknown[];
 let menuCb: ((slot: { menu: Element; modele: Element }) => void) | null;
 
@@ -37,6 +37,7 @@ const fauxBridge = (): IdBridge => ({
   surfaceNode: () => document.body,
   cadastreVisible: () => true,
   selectedBuildings: () => selection,
+  selectedWays: () => [],
   mergeBuildings: (plan) => { fusions.push(plan); },
   onEditMenu: (cb) => { menuCb = cb; return () => { menuCb = null; }; },
 });

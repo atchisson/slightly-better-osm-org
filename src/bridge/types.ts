@@ -1,6 +1,6 @@
 import type { ExistingBuilding } from '../conflation/overlap';
 import type { ExistingNode, Insertion } from '../conflation/snap';
-import type { MergePlan, OsmBuilding } from '../merge';
+import type { MergePlan, OsmWay } from '../merge';
 import type { LonLat, Ring } from '../geometry/types';
 
 /**
@@ -111,7 +111,16 @@ export interface IdBridge {
    * Rend un tableau vide si la sélection n'est pas lisible ou ne contient pas que des
    * voies fermées taguées `building` — l'appelant n'a alors rien à proposer.
    */
-  selectedBuildings(): OsmBuilding[];
+  selectedBuildings(): OsmWay[];
+  /**
+   * Toutes les voies sélectionnées, bâtiments ou non.
+   *
+   * Distincte de `selectedBuildings`, qui refuse tout ce qui n'est pas une voie fermée
+   * taguée `building` — la fusion n'a de sens que là. L'amélioration de tracé, elle,
+   * vise n'importe quelle voie : un chemin, une haie, un contour de parcelle.
+   * Lecture seule, comme sa voisine.
+   */
+  selectedWays(): OsmWay[];
   /**
    * Applique une fusion : la voie conservée reçoit la géométrie et les tags unis, la
    * seconde est supprimée.

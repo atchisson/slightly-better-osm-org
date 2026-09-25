@@ -43,6 +43,7 @@ describe('chargement par défaut — le cache ne peut jamais faire échouer le c
       surfaceNode: () => container,
       cadastreVisible: () => true,
       selectedBuildings: () => [],
+      selectedWays: () => [],
       mergeBuildings: () => {},
       onEditMenu: () => () => {},
     };

@@ -5,6 +5,8 @@ import {
 import { createMode } from './mode';
 import { createCtrlShortcut } from './ui/shortcut';
 import { attachMergeMenu, fusionnerSelection } from './ui/merge-menu';
+import { createImproveMode } from './improve/mode';
+import { createOverlay } from './ui/overlay';
 import { BUILD } from './meta';
 import type { LonLat } from './geometry/types';
 
@@ -101,17 +103,47 @@ void (async () => {
     return bridge.invert([e.clientX - rect.left, e.clientY - rect.top]);
   };
 
+  // Amélioration de tracé — étape 1 : viser et montrer, sans rien modifier.
+  //
+  // `Ctrl` sert aux deux modes, et la COUCHE AFFICHÉE les sépare : fond cadastre, il
+  // arme la création ; hors fond cadastre et avec une voie sélectionnée, il arme la
+  // visée. Les deux conditions s'excluent par construction, donc aucune ambiguïté à
+  // lever à l'exécution — et le mode actif se lit sur l'écran, pas dans une notice.
+  //
+  // Cette règle résout au passage un cas que la proximité du curseur n'aurait pas
+  // réglé : après chaque création, le greffon sélectionne la voie produite. Une voie
+  // est donc sélectionnée au moment précis où l'on veut en créer une autre — mais le
+  // fond cadastre est toujours là, donc Ctrl continue d'armer la création.
+  const cibleOverlay = createOverlay(bridge);
+  const improve = createImproveMode({
+    selectedWays: () => bridge.selectedWays(),
+    project: p => bridge.project(p),
+    showTarget: (loc, kind) => cibleOverlay.showTarget(loc, kind),
+    hideTarget: () => cibleOverlay.hideTarget(),
+  });
+  createCtrlShortcut({
+    isEnabled: () => improve.isEnabled(),
+    allowed: () => bridge.cadastreVisible() === false && bridge.selectedWays().length === 1,
+    setArmed: on => (on ? improve.enable() : improve.disable()),
+  });
+
   let frame = 0;
   surface.addEventListener('mousemove', (e) => {
+    const ev = e as MouseEvent;
+    if (improve.isEnabled()) {
+      const rect = surface.getBoundingClientRect();
+      improve.hoverAt([ev.clientX - rect.left, ev.clientY - rect.top]);
+    }
     if (!mode.isEnabled()) return;
     cancelAnimationFrame(frame);
-    frame = requestAnimationFrame(() => mode.hoverAt(toLonLat(e as MouseEvent)));
+    frame = requestAnimationFrame(() => mode.hoverAt(toLonLat(ev)));
   });
 
   // Le curseur qui quitte la carte est un des chemins de sortie de l'overlay (voir
   // src/mode.ts) : sans ce signal, le dernier contour survolé resterait affiché,
   // pointant vers un endroit que le curseur a quitté.
   surface.addEventListener('mouseleave', () => {
+    improve.hoverEnd();
     if (!mode.isEnabled()) return;
     cancelAnimationFrame(frame);
     mode.hoverEnd();
@@ -170,5 +202,5 @@ void (async () => {
 
   // Sans bouton, cette ligne est la seule chose qui dise comment déclencher le
   // greffon. Elle nomme donc le geste, pas seulement son état.
-  log('prêt — maintenir Ctrl sur la carte (couche cadastre affichée) pour armer ; deux bâtiments sélectionnés : clic droit « Fusionner », ou Alt+F');
+  log('prêt — Ctrl sur fond cadastre : créer un bâtiment ; Ctrl hors fond cadastre avec une voie sélectionnée : viser un sommet ou un segment ; deux bâtiments sélectionnés : clic droit « Fusionner », ou Alt+F');
 })();

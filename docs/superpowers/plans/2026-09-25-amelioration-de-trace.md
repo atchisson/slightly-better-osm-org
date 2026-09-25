@@ -49,7 +49,17 @@ pas théorique : après chaque création, le greffon sélectionne la voie produi
 une voie est donc sélectionnée précisément au moment où l'on veut en créer une
 autre.
 
-**Trois issues, à arbitrer :**
+> **Tranché le 2026-09-25 — et mieux que ce que je proposais.** La règle retenue
+> n'est aucune des trois ci-dessous : **c'est la couche affichée qui sépare les
+> deux modes.** `Ctrl` arme la création *sur fond cadastre*, et la visée *hors fond
+> cadastre, si une voie est sélectionnée*. Les deux conditions s'excluent par
+> construction — aucune ambiguïté à lever à l'exécution, aucun seuil de proximité à
+> régler, et le mode actif se lit sur l'écran plutôt que dans une notice. Le cas
+> gênant se règle de lui-même : après une création, le fond cadastre est toujours
+> affiché, donc `Ctrl` continue d'armer la création alors même que la voie créée est
+> sélectionnée. Les trois options ci-dessous sont conservées pour mémoire.
+
+**Trois issues, écartées :**
 
 - **(A) La proximité décide.** `Ctrl` maintenu améliore le tracé *si le curseur
   est à moins de N pixels de la voie sélectionnée*, et arme le cadastre sinon.
@@ -189,7 +199,22 @@ difficile à repérer qu'un doublon. À proposer comme option, une fois le mode 
 
 ---
 
-## 7. Ce que je demande avant d'écrire une ligne
+## 7. État
 
-Les trois arbitrages du §2 — le geste (A, B ou C), l'absence de confirmation, et
-la portée du greffon. Le reste en découle et n'appelle pas de décision.
+- **§2.1 le geste** — tranché : la couche affichée sépare les deux modes.
+- **§2.2 la confirmation** — pas encore nécessaire : l'étape 1 ne modifie rien.
+  À trancher avant l'étape 2, qui déplace un nœud.
+- **§2.3 la portée du greffon** — toujours ouvert.
+
+**Étape 1 livrée** le 2026-09-25 : `src/improve/target.ts` (visée, 10 tests),
+`src/improve/mode.ts` (contrôleur, 8 tests), marque d'aperçu dans
+`src/ui/overlay.ts`, `selectedWays()` dans le bridge. Aucun objet n'est modifié.
+
+Deux écarts assumés par rapport au plan initial :
+
+- `selectedWays()` a été ajouté à côté de `selectedBuildings()` plutôt que de
+  réutiliser ce dernier : préciser le tracé d'une haie ou d'un chemin est aussi
+  légitime que celui d'un bâtiment, et la demande parlait de « way », pas de
+  bâtiment. Lecture seule, donc sans risque.
+- Le type `OsmBuilding` est devenu `OsmWay`. Il décrivait déjà n'importe quelle
+  voie ; seul son nom mentait, et un second usage l'aurait figé.
