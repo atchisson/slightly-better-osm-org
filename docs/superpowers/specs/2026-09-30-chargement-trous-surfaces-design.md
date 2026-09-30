@@ -18,13 +18,24 @@ Date : 2026-09-30. Complète `2026-09-22-cadastre-id-design.md`.
   qu'un chargement est en vol ; il disparaît à la fin ou à l'échec.
 - Quand le chargement aboutit, le clic en attente est rejoué par le chemin normal de
   `clickAt` (même composition, mêmes refus, même contrôle de doublon).
-- Le clic en attente est abandonné si : le mode est coupé ; la carte s'est déplacée de
-  plus d'une demi-largeur d'écran depuis le clic ; le chargement échoue (seule la
-  notification réseau existante apparaît, aucun message supplémentaire).
+- Le mode n'est armé que tant que Ctrl est enfoncé (`src/ui/shortcut.ts`) : relâcher Ctrl
+  avant la fin du chargement appelle `disable()`. Le clic en attente **survit** à
+  `disable()` — la personne a cliqué délibérément — et le chargement en vol n'est pas
+  annulé.
+- Le clic en attente est abandonné si : la carte s'est déplacée de plus d'une
+  demi-étendue depuis le clic ; plus de 60 s se sont écoulées ; le chargement échoue
+  (seule la notification réseau existante apparaît, aucun message supplémentaire).
+- Un clic après une panne relance le chargement et se met en attente ; la panne
+  précédente est oubliée pour que, si elle se reproduit, elle soit de nouveau signalée.
+- Le bandeau est visible tant qu'un clic est en attente, ou que le mode est armé et
+  qu'un chargement est en vol.
 - Écart assumé avec la règle « jamais de création à l'aveugle » (spec initiale §5) : le
   clic rejoué crée sans que l'aperçu ait été vu. Les refus de composition et le contrôle
   de doublon restent appliqués.
-- Le message `chargement-en-cours` n'est plus émis par `clickAt`.
+- Le message `chargement-en-cours` disparaît (plus aucun émetteur).
+- Le survol applique le même contrôle de doublon que le clic (même filtre par nature) :
+  aujourd'hui il compare à tous les objets, si bien qu'une piscine voisine d'une maison
+  s'afficherait en refus alors que le clic passerait.
 
 ## 2. Bâtiments à trous
 
