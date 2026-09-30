@@ -1,6 +1,6 @@
 import { dropCollinear, isDegenerate, simplify } from './geometry/clean';
 import { dilatedExtent } from './geometry/edges';
-import { pointInPoly, topologicalUnion } from './geometry/union';
+import { pointInPoly, ringArea, topologicalUnion } from './geometry/union';
 import type { LonLat, Poly, Ring } from './geometry/types';
 
 export interface ComposeInput {
@@ -92,8 +92,14 @@ function sommetsPartages(ring: Ring, membres: Set<number>, input: ComposeInput):
 
 function hit(pt: LonLat, input: ComposeInput): Poly | null {
   if (input.polyAt) return input.polyAt(pt);
-  for (const p of input.polys) if (pointInPoly(pt, p)) return p;
-  return null;
+  // Même règle que Dataset.polyAt : le plus petit polygone contenant le point l'emporte.
+  const aire = (p: Poly): number =>
+    Math.abs(ringArea(p.outer)) - p.holes.reduce((a, h) => a + Math.abs(ringArea(h)), 0);
+  let best: Poly | null = null;
+  for (const p of input.polys) {
+    if (pointInPoly(pt, p) && (!best || aire(p) < aire(best))) best = p;
+  }
+  return best;
 }
 
 /**

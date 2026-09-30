@@ -437,3 +437,11 @@ describe('surfaces génériques', () => {
     expect(r.absorbed).toEqual([]);
   });
 });
+
+describe('composeAt — balayage linéaire et polygones superposés', () => {
+  it('rend le plus petit polygone contenant le point, comme Dataset.polyAt', () => {
+    const polys = [rect(0, 'surface', 0, 0, 0.01, 0.01), rect(1, 'piscine', 0.004, 0.004, 0.005, 0.005)];
+    const r = composeAt([0.0045, 0.0045], prepare(polys));
+    expect(r.ok && r.anchorId).toBe(1);
+  });
+});

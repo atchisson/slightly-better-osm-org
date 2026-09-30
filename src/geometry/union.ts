@@ -35,7 +35,7 @@ export function pointInRing(pt: LonLat, ring: Ring): boolean {
  * (`Dataset.polyAt` et le balayage linéaire de secours dans `compose.ts`), qui ne
  * testaient que l'anneau extérieur. Les deux doivent partager ce test : ils sont censés
  * être interchangeables (`ComposeInput.polyAt` peut être fourni ou, à défaut, remplacé
- * par ce même balayage).
+ * par un balayage rendant, comme lui, le plus petit polygone contenant le point).
  */
 export function pointInPoly(pt: LonLat, poly: Poly): boolean {
   if (!pointInRing(pt, poly.outer)) return false;

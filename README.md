@@ -102,13 +102,17 @@ d'autre que lire et manipuler la page d'édition elle-même.
   tout objet tracé à la main.
 - **Clic pendant le chargement.** Si les données de la commune ne sont pas encore là, le
   clic n'est pas perdu ni refusé : un bandeau « chargement » s'affiche et l'objet est
-  créé dès que les données arrivent, même si `Ctrl` est relâché entre-temps.
+  créé dès que les données arrivent, même si `Ctrl` est relâché entre-temps. C'est une
+  exception délibérée à « jamais de création à l'aveugle » : le clic rejoué saute
+  l'aperçu au survol, mais garde les refus de composition et le contrôle de doublon.
 - **Les piscines aussi, et les autres surfaces du fond cadastre.** Elles ne sont pas dans
   la couche des bâtiments du cadastre mais dans celle des surfaces topographiques
   (`tsurf`). Toutes ces surfaces sont désormais créables : piscine si le code symbole
   est 65, sinon une surface générique créée avec `area=yes` + `source` seulement (le
   cadastre n'en dit pas davantage de fiable). Une surface à cour intérieure devient un
-  multipolygone, comme un bâtiment. Une piscine est reconnue à son code symbole. Survolez-en une, cliquez : elle est créée avec
+  multipolygone, comme un bâtiment.
+
+  Une piscine se survole et se clique comme le reste : elle est créée avec
   `leisure=swimming_pool` + `access=private`, et la même attribution que tout le reste.
   Une piscine ne fusionne jamais avec rien — ni avec un bâtiment, ni avec l'abri de
   jardin qui la borde — et son contrôle de doublon la compare aux piscines déjà
@@ -258,7 +262,7 @@ attribuée à celui avec lequel la **somme** des longueurs de frontière partag�
 plus grande.
 
 **C'est une heuristique, pas une certitude, et voici sa marge d'erreur mesurée** (sur
-le fichier réel d'Angers, 50 740 bâtiments) :
+le fichier réel d'Angers, 50 740 bâtiments — mesure plus ancienne que celle du tableau des refus) :
 
 - 16 % des constructions légères (2 063 polygones sur 12 892) touchent au moins deux
   bâtiments en dur — c'est le cas ambigu où l'heuristique doit trancher.
@@ -291,11 +295,11 @@ construite, dans chacun des cas suivants (chacun avec son propre message) :
 | Union des composantes produisant un trou (refus `trou`) | 156 (0,3 %) |
 | Union produisant plusieurs parties séparées (refus `parties-multiples`) | 0 |
 | Contour qui se pince sur lui-même après union (refus `pincement`) | 82 (0,2 %) |
-| Contours qui se chevauchent (refus `chevauchement`) | 83 (0,2 %) |
+| Contours qui se chevauchent (refus `chevauchement`) | 83 (0,2 %), hors 1 piscine |
 | Bâtiment OSM déjà présent à l'endroit cliqué | non mesuré à l'échelle d'une commune |
 | Commune introuvable ou hors couverture du cadastre français | — |
 | Réseau coupé / données cadastre indisponibles | — |
-| Clic pendant le chargement des données d'une commune (rien n'est créé sans qu'un contour ait été montré au survol) | — |
+| Clic pendant le chargement des données : différé puis rejoué, sans aperçu au survol ; les refus de composition et le doublon s'appliquent à la fin | — |
 | Contexte iD non capturé au démarrage (voir plus bas) | — |
 
 Au total, sur ces 50 707 polygones, la composition échoue pour 514 d'entre eux — environ
@@ -349,7 +353,7 @@ vérifier après chaque mise à jour d'iD ou d'osm.org.
 - **Millésime WMS potentiellement différent du jeu téléchargé** (voir plus haut).
 - **Rétention mémoire non négligeable sur les grandes communes.** Le jeu de données
   d'une commune reste entièrement en mémoire une fois chargé (index spatial inclus) :
-  environ 64 Mo mesurés pour Angers (50 740 bâtiments), et de l'ordre de 293 Mo
+  environ 64 Mo mesurés pour Angers (50 740 bâtiments, mesure plus ancienne), et de l'ordre de 293 Mo
   extrapolés pour une commune de la taille de Marseille (ses seize arrondissements
   pesant environ 4,6 fois plus). Ce n'est pas dangereux — il s'agit de données longues
   à vivre, sans effet mesuré sur la fluidité — mais c'est réel, et cette version ne

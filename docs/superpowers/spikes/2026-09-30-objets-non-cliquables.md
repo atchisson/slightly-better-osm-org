@@ -9,18 +9,18 @@ non versionné.
 
 ## Verdicts par commune (un clic au centre de chaque polygone)
 
-| Verdict | Angers (51 330) | Le Lavandou (37 190) |
+| Verdict | Angers (51 330 polygones = 50 707 bâtiments + 382 surfaces + 241 piscines) | Le Lavandou (37 190) |
 |---|---|---|
 | ok | 50 815 | 36 720 |
 | trou-source | 193 | 53 |
 | trou | 156 | 103 |
 | pincement | 82 | 133 |
-| chevauchement | 84 | 179 |
+| chevauchement | 84 (83 bâtiments + 1 piscine) | 179 |
 | parties-multiples | 0 | 2 |
 | degenere | 0 | 0 |
 | aucun-batiment | 0 | 0 |
 
-Par nature à Angers : bâtiments 01/02/03 = 50 193 ok sur 50 707 ; surfaces 382/382 ok ;
+Par nature à Angers (le README ne cite que les 50 707 bâtiments : 83 chevauchements) : bâtiments 01/02/03 = 50 193 ok sur 50 707 ; surfaces 382/382 ok ;
 piscines 240/241 ok. Au Lavandou : surfaces 872/872, piscines 1 847/1 851.
 
 ## Non cliquables
