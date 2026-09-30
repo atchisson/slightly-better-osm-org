@@ -168,33 +168,42 @@ describe('mode cadastre', () => {
   });
 
   it('un bâtiment OSM déjà dans la cour n’empêche pas la création', async () => {
+    // La cour occupe 64 % de l'anneau extérieur et le bâtiment OSM la remplit presque
+    // entièrement : si le trou était ignoré du contrôle de doublon, il couvrirait ~49 %
+    // de l'emprise et serait signalé. Il ne l'est que parce que `r.holes` est transmis.
     bridge.buildingsNear = () => [{ id: 'w1', kind: 'batiment',
-      ring: carre(0.0045, 0.0045, 0.001) as any }];
+      ring: carre(0.0015, 0.0015, 0.007) as any }];
+    const notify = vi.fn();
     const mode = createMode(bridge, {
       loadDataset: async () => buildDataset('49007', '2026', [
         { ...feature('01', carre(0, 0, 0.01)),
-          geometry: { type: 'MultiPolygon', coordinates: [[carre(0, 0, 0.01), carre(0.004, 0.004, 0.002)]] } },
+          geometry: { type: 'MultiPolygon', coordinates: [[carre(0, 0, 0.01), carre(0.001, 0.001, 0.008)]] } },
       ]),
-      communeName: async () => 'Angers', notify: vi.fn(),
+      communeName: async () => 'Angers', notify,
     });
     mode.enable();
     await mode.whenReady();
-    await mode.clickAt([0.001, 0.001]);
+    await mode.clickAt([0.0005, 0.0005]);
     expect(created).toHaveLength(1);
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it('le survol et le clic donnent le même verdict de doublon', async () => {
     // Une piscine OSM voisine ne couvre pas une maison : ni le clic ni le survol ne
     // doivent la traiter comme un doublon.
     bridge.buildingsNear = () => [{ id: 'p', kind: 'piscine', ring: carre(0, 0) as any }];
+    const notify = vi.fn();
     const mode = createMode(bridge, {
       loadDataset: async () => buildDataset('49007', '2026', [feature('01', carre(0, 0))]),
-      communeName: async () => 'Angers', notify: vi.fn(),
+      communeName: async () => 'Angers', notify,
     });
     mode.enable();
     await mode.whenReady();
     mode.hoverAt([0.0005, 0.0005]);
     expect(container.querySelector('path.sb-osm-preview')!.getAttribute('class')).toContain('sb-osm-ok');
+    await mode.clickAt([0.0005, 0.0005]);
+    expect(created).toHaveLength(1);
+    expect(notify).not.toHaveBeenCalledWith(expect.stringMatching(/couvre déjà/i));
   });
 
   it('désactivé, ne crée rien', async () => {
@@ -629,17 +638,14 @@ describe('mode cadastre', () => {
     }
   });
 
-  // --- Revue finale (I3) : jamais de création à l'aveugle ---
+  // --- Clic différé : un clic pendant un chargement est mémorisé puis rejoué ---
   //
-  // Contrat PRÉCÉDENT, remplacé ici : « clickAt attend un rechargement de commune en
-  // cours plutôt que de composer contre l'ancien dataset ». Il réglait bien le défaut
-  // visé (composer contre des données périmées), mais en laissait passer un plus grave :
-  // pendant toute cette attente, hoverAt cache l'aperçu (`loading !== null`), donc le
-  // bâtiment finalement créé n'avait JAMAIS été prévisualisé. Or l'aperçu au survol est
-  // le seul garde-fou du projet contre une annexion erronée (spec §5) ; créer sans lui,
-  // c'est créer sans garde-fou. On préfère désormais perdre un clic plutôt que créer à
-  // l'aveugle : le clic ne crée rien, et le dit.
-  it('un clic pendant un rechargement de commune ne crée rien et le dit', async () => {
+  // Contrat PRÉCÉDENT (revue finale, I3), remplacé : le clic était refusé avec un message
+  // tant qu'un chargement était en vol, au nom de « jamais de création à l'aveugle ». Le
+  // clic est désormais mémorisé (un seul) et rejoué à la fin du chargement, sans message :
+  // le bandeau de chargement signale l'attente, et la création se fait contre des données
+  // à jour. Voir le commentaire de clickAt.
+  it('un clic pendant un rechargement de commune est différé puis rejoué contre la nouvelle commune', async () => {
     vi.useFakeTimers();
     try {
       const datasetA = buildDataset('49007', '2026', [feature('01', carre(0, 0))]);
@@ -673,36 +679,35 @@ describe('mode cadastre', () => {
 
       await mode.clickAt([0.5, 0.5]);
 
-      // Ni création contre l'ancien dataset (A, où ce point est « aucun bâtiment »,
-      // silencieux), ni création contre B sans l'avoir montré au survol.
+      // Ni création contre l'ancien dataset (A, où ce point est « aucun bâtiment »),
+      // ni message : le clic attend.
       expect(created).toHaveLength(0);
-      expect(notify).toHaveBeenCalledWith(expect.stringMatching(/chargement/i));
+      expect(notify).not.toHaveBeenCalled();
 
-      // Et une fois B là, le même clic crée — la donnée est sûre, l'aperçu la montre.
+      // Une fois B là, le clic mémorisé est rejoué de lui-même.
       resoudreChargementB(datasetB);
       await mode.whenReady();
-      await mode.clickAt([0.5, 0.5]);
       expect(created).toHaveLength(1);
+      expect(notify).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('un clic avant le tout premier chargement ne crée rien et le dit', async () => {
+  it('un clic pendant le chargement est différé puis rejoué, sans message', async () => {
     const attente = deferred<Dataset>();
     const notify = vi.fn();
-    const mode = createMode(bridge, {
-      loadDataset: () => attente.promise,
-      communeName: async () => 'Angers',
-      notify,
-    });
+    const mode = createMode(bridge, { loadDataset: () => attente.promise, communeName: async () => 'X', notify });
     mode.enable();
 
     await mode.clickAt([0.0005, 0.0005]);
-
     expect(created).toHaveLength(0);
-    expect(notify).toHaveBeenCalledWith(expect.stringMatching(/chargement/i));
+    expect(notify).not.toHaveBeenCalled();
+
     attente.resolve(buildDataset('49007', '2026', [feature('01', carre(0, 0))]));
+    await mode.whenReady();
+    expect(created).toHaveLength(1);
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it('un clic après un chargement raté relance un chargement au lieu de rester inerte', async () => {
@@ -719,10 +724,80 @@ describe('mode cadastre', () => {
 
     await mode.clickAt([0.0005, 0.0005]);
     expect(created).toHaveLength(0);
-    await mode.whenReady();          // le clic a relancé un chargement : il réussit
-
-    await mode.clickAt([0.0005, 0.0005]);
+    await mode.whenReady();          // le clic a relancé un chargement, l'a mémorisé, et rejoué
     expect(created).toHaveLength(1);
+  });
+
+  it('ne rejoue que le dernier de deux clics en attente', async () => {
+    const attente = deferred<Dataset>();
+    const mode = createMode(bridge, { loadDataset: () => attente.promise, communeName: async () => 'X', notify: vi.fn() });
+    mode.enable();
+    await mode.clickAt([0.0005, 0.0005]);
+    await mode.clickAt([0.0015, 0.0005]);
+    attente.resolve(buildDataset('49007', '2026',
+      [feature('01', carre(0, 0)), feature('01', carre(0.001, 0))]));
+    await mode.whenReady();
+    expect(created).toHaveLength(1);
+  });
+
+  it('rejoue le clic même si Ctrl est relâché avant la fin du chargement', async () => {
+    const attente = deferred<Dataset>();
+    const mode = createMode(bridge, { loadDataset: () => attente.promise, communeName: async () => 'X', notify: vi.fn() });
+    mode.enable();
+    await mode.clickAt([0.0005, 0.0005]);
+    mode.disable();
+    attente.resolve(buildDataset('49007', '2026', [feature('01', carre(0, 0))]));
+    await mode.whenReady();
+    expect(created).toHaveLength(1);
+  });
+
+  it('abandonne le clic en attente si le chargement échoue, avec une seule notification', async () => {
+    const notify = vi.fn();
+    const mode = createMode(bridge, {
+      loadDataset: async () => { throw new Error('panne'); }, communeName: async () => 'X', notify });
+    mode.enable();
+    await mode.clickAt([0.0005, 0.0005]);
+    await mode.whenReady();
+    expect(created).toHaveLength(0);
+    expect(notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('abandonne le clic en attente si la carte a beaucoup bougé', async () => {
+    const attente = deferred<Dataset>();
+    const mode = createMode(bridge, { loadDataset: () => attente.promise, communeName: async () => 'X', notify: vi.fn() });
+    mode.enable();
+    await mode.clickAt([0.0005, 0.0005]);
+    bridge.mapExtent = () => [[0.5, 0.5], [0.51, 0.51]];
+    attente.resolve(buildDataset('49007', '2026', [feature('01', carre(0, 0))]));
+    await mode.whenReady();
+    expect(created).toHaveLength(0);
+  });
+
+  it('abandonne le clic en attente après 60 s', async () => {
+    vi.useFakeTimers();
+    try {
+      const attente = deferred<Dataset>();
+      const mode = createMode(bridge, { loadDataset: () => attente.promise, communeName: async () => 'X', notify: vi.fn() });
+      mode.enable();
+      await mode.clickAt([0.0005, 0.0005]);
+      vi.advanceTimersByTime(61_000);
+      attente.resolve(buildDataset('49007', '2026', [feature('01', carre(0, 0))]));
+      await mode.whenReady();
+      expect(created).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('affiche le bandeau pendant le chargement et le retire ensuite', async () => {
+    const attente = deferred<Dataset>();
+    const mode = createMode(bridge, { loadDataset: () => attente.promise, communeName: async () => 'X', notify: vi.fn() });
+    mode.enable();
+    const bandeau = () => container.querySelector('.sb-osm-loading') as HTMLElement;
+    expect(bandeau().style.display).not.toBe('none');
+    attente.resolve(buildDataset('49007', '2026', [feature('01', carre(0, 0))]));
+    await mode.whenReady();
+    expect(bandeau().style.display).toBe('none');
   });
 
   // La contrepartie du refus ci-dessus : passé les gardes d'entrée, PLUS AUCUNE attente
