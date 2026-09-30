@@ -34,7 +34,7 @@ export function datasetUrl(insee: string, millesime: string): string {
  *
  * Elles ne sont PAS dans la couche bâtiments — vérifié : celle-ci ne porte que les
  * types `01` et `02`. Elles vivent dans `tsurf`, sous le dossier `raw/` du dépôt, et
- * s'y reconnaissent au code symbole 65 (voir `estPiscine`).
+ * s'y reconnaissent au code symbole 65 (voir `SYM_PISCINE`).
  */
 export function tsurfUrl(insee: string, millesime: string): string {
   const dep = departementOf(insee);
@@ -61,10 +61,7 @@ export function tsurfUrl(insee: string, millesime: string): string {
  * Les 26 à 35 % sans correspondance OSM sont vraisemblablement des piscines non
  * encore cartographiées — précisément ce que cet outil sert à ajouter.
  */
-const SYM_PISCINE = '65';
-
-const estPiscine = (f: unknown): boolean =>
-  (f as { properties?: { SYM?: unknown } })?.properties?.SYM === SYM_PISCINE;
+export const SYM_PISCINE = '65';
 
 /** Le jeu demandé n'existe pas à ce millésime — distinct de toute autre panne. */
 export class DatasetIntrouvable extends Error {}
@@ -95,13 +92,16 @@ async function fetchMillesimes(fetchFn: typeof fetch): Promise<string[]> {
 }
 
 /**
- * Piscines d'une commune à un millésime donné.
+ * Toutes les surfaces d'une commune à un millésime donné.
+ *
+ * Aucun filtre ici : les codes symbole sont triés à la construction du jeu (piscine ou
+ * surface générique, voir `toSurfaces`).
  *
  * Une couche absente n'est pas une panne : toutes les communes n'ont pas de fichier
- * `tsurf`, et une commune sans piscine est un cas parfaitement ordinaire. On rend
- * alors une liste vide plutôt que de faire échouer le chargement des bâtiments.
+ * `tsurf`. On rend alors une liste vide plutôt que de faire échouer le chargement des
+ * bâtiments.
  */
-async function downloadPiscines(
+async function downloadSurfaces(
   insee: string,
   millesime: string,
   fetchFn: typeof fetch,
@@ -111,14 +111,14 @@ async function downloadPiscines(
     if (!res.ok || !res.body) return [];
     const stream = res.body.pipeThrough(new DecompressionStream('gzip'));
     const parsed = JSON.parse(await new Response(stream).text()) as { features?: unknown[] };
-    return (parsed.features ?? []).filter(estPiscine);
+    return parsed.features ?? [];
   } catch {
     return [];
   }
 }
 
 /**
- * Piscines seules, pour une commune dont les bâtiments sont déjà en cache.
+ * Surfaces seules, pour une commune dont les bâtiments sont déjà en cache.
  *
  * Existe à cause d'un défaut introduit avec la prise en charge des piscines : le champ
  * a été rendu optionnel dans le cache pour ne pas périmer des dizaines de mégaoctets
@@ -131,7 +131,7 @@ async function downloadPiscines(
  * 2026 sous une attribution 2025 serait une attribution fausse, et la Licence Ouverte
  * ne s'en accommode pas. Si aucun millésime ne correspond, on rend une liste vide.
  */
-export async function downloadPiscinesForYear(
+export async function downloadSurfacesForYear(
   insee: string,
   annee: string,
   fetchFn: typeof fetch = fetch,
@@ -141,7 +141,7 @@ export async function downloadPiscinesForYear(
     if (millesimes.length === 0) return [];
     const codes = arrondissementCodes(insee);
     const parts = await Promise.all(
-      codes.map(code => downloadPiscines(code, millesimes[0]!, fetchFn)));
+      codes.map(code => downloadSurfaces(code, millesimes[0]!, fetchFn)));
     return parts.flat();
   } catch {
     return [];
@@ -170,7 +170,7 @@ async function downloadOne(
 export async function downloadCommune(
   insee: string,
   fetchFn: typeof fetch = fetch,
-): Promise<{ features: unknown[]; piscines: unknown[]; millesime: string }> {
+): Promise<{ features: unknown[]; surfaces: unknown[]; millesime: string }> {
   const millesimes = await fetchMillesimes(fetchFn);
 
   // Paris, Lyon et Marseille n'existent pas sous leur code commune dans le jeu Etalab :
@@ -197,16 +197,16 @@ export async function downloadCommune(
   for (const millesime of candidats) {
     try {
       const parts = await Promise.all(codes.map(code => downloadOne(code, millesime, fetchFn)));
-      // Les piscines seulement une fois les bâtiments obtenus : leur absence ne doit
+      // Les surfaces seulement une fois les bâtiments obtenus : leur absence ne doit
       // jamais empêcher un repli de millésime sur les bâtiments, qui sont l'essentiel.
-      const piscines = await Promise.all(codes.map(code => downloadPiscines(code, millesime, fetchFn)));
+      const surfaces = await Promise.all(codes.map(code => downloadSurfaces(code, millesime, fetchFn)));
       if (millesime !== candidats[0]) {
         console.warn(
           `[sb-osm] ${insee} absent du millésime ${candidats[0]} ; repli sur ` +
           `${millesime}. Le dépôt est probablement en cours de republication.`,
         );
       }
-      return { features: parts.flat(), piscines: piscines.flat(), millesime: millesime.slice(0, 4) };
+      return { features: parts.flat(), surfaces: surfaces.flat(), millesime: millesime.slice(0, 4) };
     } catch (err) {
       if (!(err instanceof DatasetIntrouvable)) throw err;
       absence = err;

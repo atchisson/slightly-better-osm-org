@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toPolys, buildDataset, buildLightIndex } from '../../src/cadastre/dataset';
+import { toPolys, toSurfaces, buildDataset, buildLightIndex } from '../../src/cadastre/dataset';
 import { buildEdgeIndex } from '../../src/geometry/edges';
 import { lightComponents } from '../../src/geometry/components';
 import type { Poly } from '../../src/geometry/types';
@@ -158,5 +158,33 @@ describe('polysNear', () => {
     ]);
     const voisins = d.polysNear([[0, 0], [0.0002, 0.0002]]).map(p => p.id).sort();
     expect(voisins).toContain(1);
+  });
+});
+
+const surf = (sym: string, ring: number[][], holes: number[][][] = []) => ({
+  type: 'Feature',
+  geometry: { type: 'Polygon', coordinates: [ring, ...holes] },
+  properties: { SYM: sym },
+});
+
+describe('surfaces', () => {
+  it('type piscine pour le code 65, surface pour tout autre code', () => {
+    const polys = toSurfaces([surf('65', carre(0, 0)), surf('34', carre(0.01, 0))], 5);
+    expect(polys.map(p => p.type)).toEqual(['piscine', 'surface']);
+    expect(polys.map(p => p.id)).toEqual([5, 6]);
+  });
+
+  it('conserve les trous d’une surface', () => {
+    const polys = toSurfaces([surf('34', carre(0, 0, 0.01), [carre(0.002, 0.002)])], 0);
+    expect(polys[0]!.holes).toHaveLength(1);
+  });
+
+  it('buildDataset les numérote à la suite des bâtiments et les rend survolables', () => {
+    const ds = buildDataset('49007', '2026',
+      [feature('01', carre(0, 0))],
+      [surf('65', carre(0.01, 0)), surf('34', carre(0.02, 0))]);
+    expect(ds.polys.map(p => p.type)).toEqual(['01', 'piscine', 'surface']);
+    expect(ds.polys.map(p => p.id)).toEqual([0, 1, 2]);
+    expect(ds.polyAt([0.0205, 0.0005])?.type).toBe('surface');
   });
 });

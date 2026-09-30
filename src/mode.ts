@@ -1,7 +1,7 @@
 import { composeAt } from './compose';
 import type { Composition } from './compose';
 import { buildDataset, type Dataset } from './cadastre/dataset';
-import { downloadCommune, downloadPiscinesForYear } from './cadastre/download';
+import { downloadCommune, downloadSurfacesForYear } from './cadastre/download';
 import { readCache, writeCache } from './cadastre/store';
 import { communeAt } from './cadastre/insee';
 import { overlapsExisting } from './conflation/overlap';
@@ -76,32 +76,34 @@ async function defaultLoadDataset(pt: LonLat): Promise<Dataset> {
   if (!commune) throw new CommuneIntrouvableError();
   const cached = await readCache(commune.code);
   if (cached) {
-    // Une entrée écrite avant la prise en charge des piscines n'en porte aucune. Sans
-    // ce complément, la fonctionnalité n'existerait pas — en silence — pour quiconque
-    // a déjà utilisé le greffon sur cette commune, et jusqu'à l'expiration du cache.
-    let piscines = cached.piscines;
-    if (piscines === undefined) {
-      piscines = await downloadPiscinesForYear(cached.insee, cached.millesime);
-      console.log(
-        `[sb-osm] ${piscines.length} piscine(s) ajoutées au cache de ${cached.insee} ` +
-        '(entrée écrite avant leur prise en charge).',
-      );
-      void writeCache({ ...cached, piscines }).catch(() => { /* confort, jamais bloquant */ });
+    // Une entrée écrite avant la prise en charge des surfaces n'en porte aucune (ou
+    // seulement des piscines). Sans ce complément, la fonctionnalité n'existerait pas —
+    // en silence — pour quiconque a déjà utilisé le greffon sur cette commune.
+    let surfaces = cached.surfaces;
+    if (surfaces === undefined) {
+      surfaces = await downloadSurfacesForYear(cached.insee, cached.millesime);
+      console.log(`[sb-osm] ${surfaces.length} surface(s) ajoutées au cache de ${cached.insee}.`);
+      // Un complément vide est peut-être une panne : on ne l'écrit pas, pour retenter
+      // au prochain chargement plutôt que de figer « aucune surface » jusqu'à expiration.
+      if (surfaces.length > 0) {
+        const { piscines: _ancien, ...reste } = cached;
+        void writeCache({ ...reste, surfaces }).catch(() => { /* confort, jamais bloquant */ });
+      }
     }
-    return buildDataset(cached.insee, cached.millesime, cached.features, piscines);
+    return buildDataset(cached.insee, cached.millesime, cached.features, surfaces);
   }
-  const { features, piscines, millesime } = await downloadCommune(commune.code);
+  const { features, surfaces, millesime } = await downloadCommune(commune.code);
   // Le cache est un confort, jamais une condition du chargement : il est délibérément
   // HORS du chemin de retour. `await writeCache(...)` faisait échouer tout le
   // chargement APRÈS un téléchargement réussi si IndexedDB refusait l'écriture — un
   // dépassement de quota, vraisemblable sur Paris ou Marseille et leur centaine de Mo
   // de features sérialisées — et la personne lisait alors « vérifiez votre connexion »
   // alors que le réseau avait parfaitement fonctionné.
-  void writeCache({ insee: commune.code, millesime, fetchedAt: Date.now(), features, piscines })
+  void writeCache({ insee: commune.code, millesime, fetchedAt: Date.now(), features, surfaces })
     .catch(err => console.warn(
       '[sb-osm] mise en cache impossible (les données restent utilisables, elles seront ' +
       'retéléchargées à la prochaine session) :', err));
-  return buildDataset(commune.code, millesime, features, piscines);
+  return buildDataset(commune.code, millesime, features, surfaces);
 }
 
 export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): CadastreMode {

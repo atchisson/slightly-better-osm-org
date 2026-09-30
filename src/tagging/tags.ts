@@ -62,6 +62,17 @@ export function poolTags(millesime: string): Record<string, string> {
   };
 }
 
+/**
+ * Tags d'une surface topographique sans nature connue : `area=yes` seulement.
+ *
+ * Le code symbole cadastral ne se traduit pas de façon fiable en tag OSM, et un tag
+ * inventé est pire que pas de tag. `area=yes` suffit à lever l'avertissement d'iD sur
+ * une voie fermée sans tag, et laisse la personne qui édite la qualifier.
+ */
+export function surfaceTags(millesime: string): Record<string, string> {
+  return { area: 'yes', source: SOURCE_PREFIX + requireMillesime(millesime) };
+}
+
 export function changesetComment(commune: string): string {
   return `Bâtiments depuis le cadastre (${commune})`;
 }

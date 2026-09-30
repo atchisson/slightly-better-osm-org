@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  datasetUrl, millesimesFromListing, downloadCommune, downloadPiscinesForYear, LISTING_URL,
+  datasetUrl, millesimesFromListing, downloadCommune, downloadSurfacesForYear, LISTING_URL,
 } from '../../src/cadastre/download';
 
 /** Un listing S3 comme en rend le dépôt Etalab, réduit aux préfixes qui nous importent. */
@@ -152,7 +152,7 @@ describe('downloadCommune', () => {
   });
 });
 
-describe('piscines', () => {
+describe('surfaces', () => {
   const tsurf = (syms: string[]) => ({
     features: syms.map(SYM => ({
       properties: { SYM },
@@ -165,10 +165,7 @@ describe('piscines', () => {
     return new Response(new Blob([text]).stream().pipeThrough(cs)).arrayBuffer();
   };
 
-  it('ne retient que le code symbole des piscines', async () => {
-    // Mesuré contre les piscines déjà cartographiées dans OSM : seul 65 tient sur deux
-    // communes de profils opposés. 34 semblait convaincant dans le Var (81 %) et
-    // s'effondre à Angers (1 %) — un artefact de densité.
+  it('garde toutes les surfaces topographiques, pas seulement les piscines', async () => {
     const bat = await gzip(JSON.stringify({ features: [] }));
     const sur = await gzip(JSON.stringify(tsurf(['65', '34', '33', '65'])));
     const fetchFn = vi.fn().mockImplementation(async (url: string) => {
@@ -179,7 +176,7 @@ describe('piscines', () => {
 
     const r = await downloadCommune('49007', fetchFn);
 
-    expect(r.piscines).toHaveLength(2);
+    expect(r.surfaces).toHaveLength(4);
   });
 
   it('se passe d’une couche tsurf absente sans faire échouer les bâtiments', async () => {
@@ -195,11 +192,11 @@ describe('piscines', () => {
     const r = await downloadCommune('49007', fetchFn);
 
     expect(r.features).toHaveLength(1);
-    expect(r.piscines).toEqual([]);
+    expect(r.surfaces).toEqual([]);
   });
 });
 
-describe('downloadPiscinesForYear — combler une entrée de cache ancienne', () => {
+describe('downloadSurfacesForYear — combler une entrée de cache ancienne', () => {
   const gz = async (o: unknown): Promise<ArrayBuffer> => {
     const cs = new CompressionStream('gzip');
     return new Response(new Blob([JSON.stringify(o)]).stream().pipeThrough(cs)).arrayBuffer();
@@ -222,7 +219,7 @@ describe('downloadPiscinesForYear — combler une entrée de cache ancienne', ()
       return { ok: true, status: 200, body: new Blob([sur]).stream() };
     }) as unknown as typeof fetch;
 
-    const r = await downloadPiscinesForYear('49007', '2025', fetchFn);
+    const r = await downloadSurfacesForYear('49007', '2025', fetchFn);
 
     expect(r).toHaveLength(2);
     const urls = (fetchFn as unknown as { mock: { calls: string[][] } }).mock.calls.map(c => c[0]!);
@@ -238,12 +235,12 @@ describe('downloadPiscinesForYear — combler une entrée de cache ancienne', ()
     )) as unknown as typeof fetch;
 
     // Aucun millésime de 2019 dans le dépôt : on ne sert rien.
-    expect(await downloadPiscinesForYear('49007', '2019', fetchFn)).toEqual([]);
+    expect(await downloadSurfacesForYear('49007', '2019', fetchFn)).toEqual([]);
   });
 
   it('n’échoue jamais : un complément raté laisse les bâtiments utilisables', async () => {
     const fetchFn = vi.fn().mockRejectedValue(new Error('réseau')) as unknown as typeof fetch;
 
-    await expect(downloadPiscinesForYear('49007', '2026', fetchFn)).resolves.toEqual([]);
+    await expect(downloadSurfacesForYear('49007', '2026', fetchFn)).resolves.toEqual([]);
   });
 });

@@ -2,6 +2,7 @@ import { buildEdgeIndex } from '../geometry/edges';
 import { absorptionMap, lightComponents } from '../geometry/components';
 import type { LightComponent } from '../geometry/components';
 import { pointInPoly } from '../geometry/union';
+import { SYM_PISCINE } from './download';
 import type { BatType, LonLat, Poly, Ring } from '../geometry/types';
 
 const CELL = 0.002;   // ~150 m : quelques polygones par case
@@ -39,22 +40,24 @@ export function toPolys(features: unknown[]): Poly[] {
 }
 
 /**
- * Polygones de piscines, lus dans la couche `tsurf` déjà filtrée sur le code symbole.
+ * Polygones de la couche `tsurf` (surfaces topographiques du PCI).
+ *
+ * Le code symbole 65 désigne les piscines (voir SYM_PISCINE, mesuré) ; tout autre code
+ * devient une `surface` générique, que l'outil créera avec `area=yes` seulement — le
+ * cadastre ne dit rien de plus fiable sur sa nature.
  *
  * `offset` continue la numérotation des bâtiments : un identifiant de polygone doit
- * rester unique dans tout le jeu, puisque `byId`, la grille et l'index des légers les
- * mélangent.
+ * rester unique dans tout le jeu.
  */
-export function toPiscines(features: unknown[], offset: number): Poly[] {
+export function toSurfaces(features: unknown[], offset: number): Poly[] {
   const polys: Poly[] = [];
   for (const f of features) {
-    const feat = f as { geometry?: { coordinates?: unknown } };
+    const feat = f as { geometry?: { coordinates?: unknown }; properties?: { SYM?: unknown } };
     const coords = feat.geometry?.coordinates as Ring[] | undefined;
     const outer = coords?.[0];
     if (!outer || outer.length < 4) continue;
-    // `tsurf` est une couche de polygones simples, pas de multipolygones : un seul
-    // niveau de tableau de moins que la couche bâtiments.
-    polys.push({ id: offset + polys.length, type: 'piscine', outer, holes: coords!.slice(1) });
+    const type = feat.properties?.SYM === SYM_PISCINE ? 'piscine' : 'surface';
+    polys.push({ id: offset + polys.length, type, outer, holes: coords!.slice(1) });
   }
   return polys;
 }
@@ -87,14 +90,14 @@ export function buildDataset(
   insee: string,
   millesime: string,
   features: unknown[],
-  piscines: unknown[] = [],
+  surfaces: unknown[] = [],
 ): Dataset {
   const batiments = toPolys(features);
-  // Les piscines rejoignent le même tableau : elles partagent le survol, la grille et
-  // le recalage. Elles ne participent en revanche à aucune composante légère —
+  // Piscines et surfaces rejoignent le même tableau : elles partagent le survol, la
+  // grille et le recalage. Elles ne participent en revanche à aucune composante légère —
   // `lightComponents` ne retient que le type `02`, et `isHard` ne les reconnaît pas,
-  // donc une piscine ne peut ni absorber ni être absorbée.
-  const polys = [...batiments, ...toPiscines(piscines, batiments.length)];
+  // donc ni une piscine ni une surface ne peut absorber ou être absorbée.
+  const polys = [...batiments, ...toSurfaces(surfaces, batiments.length)];
   // edgeIndex n'est nécessaire que pour calculer les composantes légères : il n'est lu
   // par aucun code après buildDataset (composeFor le déclarait sans jamais le consulter).
   // Mesuré à 82,6 Mo sur Angers — 95 % du coût de polys+index — c'est délibérément une
