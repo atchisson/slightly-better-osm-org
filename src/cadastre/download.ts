@@ -30,7 +30,8 @@ export function datasetUrl(insee: string, millesime: string): string {
 }
 
 /**
- * Couche des surfaces topographiques du PCI, d'où viennent les piscines.
+ * Couche des surfaces topographiques du PCI : elle porte TOUTES les surfaces
+ * topographiques, les piscines n'en étant qu'une (code symbole 65).
  *
  * Elles ne sont PAS dans la couche bâtiments — vérifié : celle-ci ne porte que les
  * types `01` et `02`. Elles vivent dans `tsurf`, sous le dossier `raw/` du dépôt, et

@@ -60,8 +60,12 @@ Date : 2026-09-30. Complète `2026-09-22-cadastre-id-design.md`.
 - Type `Poly.type` : `piscine` (code 65) ou `surface` (tout autre code). Une `surface`
   ne participe à aucune composante légère, n'absorbe et n'est absorbée par rien.
 - Tags : piscine inchangée (`leisure=swimming_pool`, `access=private`, `source`) ; autre
-  surface : `area=yes` et `source` uniquement, sans autre tag, pour lever l'avertissement
-  d'iD sans inventer de sémantique.
+  surface : `area=yes` et `source` uniquement, sans autre tag, sans inventer de sémantique
+  (demande explicite). L'intention est d'éviter la voie fermée sans tag ; NON VÉRIFIÉ
+  contre un vrai iD : d'après son code source (validations/missing_tag,
+  `hasDescriptiveTags` ignore `area`, `source` n'est pas descriptif), l'erreur « tags
+  incomplets » peut subsister et bloquer l'envoi jusqu'à ce que la personne qualifie ou
+  supprime la surface. À vérifier (docs/verification-manuelle.md).
 - Cache : le champ `piscines` devient `surfaces` (toutes les surfaces). Une entrée qui n'a
   que `piscines` est complétée une fois par un rechargement de `tsurf` (même mécanisme
   et même contrainte de millésime-année que `downloadPiscinesForYear`).

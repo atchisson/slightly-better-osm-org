@@ -195,7 +195,11 @@ supplémentaire, voir plus bas).
       `source=…` ; les deux voies (extérieure et intérieure) n'ont pas de tags ; un seul
       `Ctrl+Z` défait tout d'un coup (relation et voies).
 - [ ] Créer une surface générique (survol d'une surface non piscine) : elle porte
-      `area=yes` + `source`, et iD ne signale pas de « voie fermée sans tag ».
+      `area=yes` + `source`. **Point non vérifié** : d'après le code source d'iD
+      (validations/missing_tag), l'erreur « tags incomplets » peut subsister. Ouvrir le
+      panneau des problèmes, noter si une erreur ou un avertissement reste sur la surface,
+      et si l'envoi des modifications est bloqué tant qu'elle n'est pas qualifiée ou
+      supprimée.
 - [ ] Cliquer pendant le chargement (vider le cache de la commune au préalable) : le
       bandeau de chargement s'affiche, aucun message d'erreur, et l'objet est créé à la
       fin du chargement, y compris si `Ctrl` est relâché entre-temps.

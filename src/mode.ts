@@ -89,13 +89,18 @@ async function defaultLoadDataset(pt: LonLat): Promise<Dataset> {
     // en silence — pour quiconque a déjà utilisé le greffon sur cette commune.
     let surfaces = cached.surfaces;
     if (surfaces === undefined) {
-      surfaces = await downloadSurfacesForYear(cached.insee, cached.millesime);
-      console.log(`[sb-osm] ${surfaces.length} surface(s) ajoutées au cache de ${cached.insee}.`);
-      // Un complément vide est peut-être une panne : on ne l'écrit pas, pour retenter
-      // au prochain chargement plutôt que de figer « aucune surface » jusqu'à expiration.
-      if (surfaces.length > 0) {
+      const complement = await downloadSurfacesForYear(cached.insee, cached.millesime);
+      console.log(`[sb-osm] ${complement.length} surface(s) ajoutées au cache de ${cached.insee}.`);
+      if (complement.length > 0) {
+        surfaces = complement;
         const { piscines: _ancien, ...reste } = cached;
         void writeCache({ ...reste, surfaces }).catch(() => { /* confort, jamais bloquant */ });
+      } else {
+        // Un complément vide est peut-être une panne : on ne l'écrit pas, pour retenter
+        // au prochain chargement plutôt que de figer « aucune surface » jusqu'à
+        // expiration. Pour cette session, on garde les piscines de l'ancien format
+        // plutôt que de les perdre.
+        surfaces = (cached.piscines ?? []) as typeof complement;
       }
     }
     return buildDataset(cached.insee, cached.millesime, cached.features, surfaces);
@@ -147,7 +152,7 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
    * Il survit à disable() — le mode n'est armé que tant que Ctrl est enfoncé, et la
    * personne qui relâche Ctrl avant la fin du chargement a bien cliqué.
    */
-  let attente: { pt: LonLat; etendue: [LonLat, LonLat]; depuis: number } | null = null;
+  let attente: { pt: LonLat; depuis: number } | null = null;
   let banniere: LoadingBanner | null = null;
 
   /**
@@ -347,26 +352,27 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
     else banniere?.hide();
   };
 
-  /** La carte a-t-elle quitté la zone du clic (plus d'une demi-étendue) ? */
-  const carteDeplacee = (avant: [LonLat, LonLat]): boolean => {
-    const [[x0, y0], [x1, y1]] = avant;
-    const [cx, cy] = centreOf(bridge.mapExtent());
-    const [ax, ay] = centreOf(avant);
-    return Math.abs(cx - ax) > (x1 - x0) / 2 || Math.abs(cy - ay) > (y1 - y0) / 2;
+  /** Le point est-il dans la vue courante de la carte ? */
+  const dansLaVue = (pt: LonLat): boolean => {
+    const [[x0, y0], [x1, y1]] = bridge.mapExtent();
+    return pt[0] >= x0 && pt[0] <= x1 && pt[1] >= y0 && pt[1] <= y1;
   };
 
   /**
    * Rejoue le clic mémorisé quand les données sont là. Abandonné sans bruit s'il est trop
-   * vieux ou si la carte a beaucoup bougé : la personne ne regarde plus cet endroit, et
-   * créer là où elle ne regarde pas, c'est créer sans garde-fou.
+   * vieux ou si la vue courante ne le contient plus (zoom, panoramique, même partiel) :
+   * la personne ne regarde plus cet endroit, et surtout `bridge.buildingsNear` et
+   * `bridge.nodesIn` ne voient QUE la vue courante — hors vue, le contrôle de doublon, le
+   * recalage et l'insertion dans les murs ne verraient rien et un doublon serait publié.
+   * `creer` exige en plus que l'anneau composé tienne entièrement dans la vue.
    */
   const rejouerSiPret = (): void => {
     if (loading !== null || !dataset || !attente) { majBanniere(); return; }
     const a = attente;
     attente = null;
     majBanniere();
-    if (Date.now() - a.depuis > ATTENTE_MAX_MS || carteDeplacee(a.etendue)) return;
-    void creer(a.pt);
+    if (Date.now() - a.depuis > ATTENTE_MAX_MS || !dansLaVue(a.pt)) return;
+    void creer(a.pt, true);
   };
 
   /**
@@ -378,13 +384,13 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
    * que l'aperçu est le seul garde-fou contre une annexion erronée (spec §5) — perdait
    * des clics et laissait un mode d'apparence inerte. Elle est assouplie sciemment : le
    * clic est mémorisé (un seul) et rejoué à la fin du chargement, contre des données à
-   * jour, à condition que la carte n'ait pas quitté la zone et que l'attente n'ait pas
+   * jour, à condition que la vue courante contienne encore le clic (et l'anneau composé) et que l'attente n'ait pas
    * dépassé ATTENTE_MAX_MS. L'écart assumé : l'objet créé au rejeu n'a pas été
    * prévisualisé ; le bandeau de chargement dit pourquoi rien n'apparaît, et la personne
    * peut annuler (Ctrl+Z). Passé les gardes de clickAt, PLUS AUCUNE attente ne précède
    * `createBuilding` : aucune fenêtre où l'état changerait entre décision et création.
    */
-  const creer = async (pt: LonLat): Promise<void> => {
+  const creer = async (pt: LonLat, exigerDansLaVue = false): Promise<void> => {
     const ds = dataset;
     if (!ds) return;
     const r = compose(pt);
@@ -394,6 +400,14 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       // cadastre est le cas le plus fréquent d'un clic hors cible, pas une erreur.
       if (r.reason !== 'aucun-batiment') notify(refusalMessage(r.reason));
       return;
+    }
+    if (exigerDansLaVue) {
+      // Rejeu d'un clic différé : la vue a pu changer depuis. Un anneau qui déborde de la
+      // vue courante ne serait qu'en partie visible de buildingsNear / nodesIn : le
+      // contrôle de doublon serait aveugle. On abandonne sans message (le clic direct,
+      // lui, est toujours dans la vue au moment où il est donné).
+      const [[x0, y0], [x1, y1]] = bridge.mapExtent();
+      if (r.ring.some(([x, y]) => x < x0 || x > x1 || y < y0 || y > y1)) return;
     }
     // Un objet ne fait doublon qu'avec un objet de même nature (voir doublonDe). Sans
     // ce filtre, une piscine serait déclarée déjà cartographiée à cause de la maison
@@ -526,7 +540,7 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       // données sont là, sans message. Une panne précédente est oubliée avant de
       // relancer, pour que sa répétition soit signalée à nouveau.
       if (loading !== null || !dataset) {
-        attente = { pt, etendue: bridge.mapExtent(), depuis: Date.now() };
+        attente = { pt, depuis: Date.now() };
         if (loading === null) { lastFailureReason = null; void ensureDataset(pt); }
         majBanniere();
         return;

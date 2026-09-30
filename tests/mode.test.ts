@@ -694,6 +694,55 @@ describe('mode cadastre', () => {
     }
   });
 
+  it('un chargement dépassé par un plus récent pendant qu’un clic attend : rejoué une seule fois, contre le plus récent', async () => {
+    vi.useFakeTimers();
+    try {
+      const datasetA = buildDataset('49007', '2026', [feature('01', carre(0, 0))]);
+      const datasetB = buildDataset('49008', '2026', [feature('01', carre(0.5, 0.5))]);
+      const datasetC = buildDataset('49009', '2026', [feature('01', carre(0.9, 0.9))]);
+      const chargementB = deferred<Dataset>();
+      const chargementC = deferred<Dataset>();
+      let appels = 0;
+      const loadDataset = vi.fn(async (): Promise<Dataset> => {
+        appels++;
+        return appels === 1 ? datasetA : appels === 2 ? chargementB.promise : chargementC.promise;
+      });
+      const { declencherDeplacement } = bridgeAvecDeplacements(bridge);
+      let extent: [LonLat, LonLat] = [[0, 0], [0.01, 0.01]];
+      bridge.mapExtent = () => extent;
+      const mode = createMode(bridge, {
+        loadDataset,
+        communeCodeAt: async (pt: LonLat) => (pt[0] < 0.4 ? '49007' : pt[0] < 0.7 ? '49008' : '49009'),
+        communeName: async () => 'X',
+        notify: vi.fn(),
+      });
+      mode.enable();
+      await mode.whenReady();
+
+      extent = [[0.495, 0.495], [0.505, 0.505]]; // vers B
+      declencherDeplacement();
+      await vi.advanceTimersByTimeAsync(600);
+      extent = [[0.895, 0.895], [0.905, 0.905]]; // vers C, avant que B ne se résolve
+      declencherDeplacement();
+      await vi.advanceTimersByTimeAsync(600);
+      expect(loadDataset).toHaveBeenCalledTimes(3);
+
+      await mode.clickAt([0.9005, 0.9005]); // attend : deux chargements en vol
+
+      chargementB.resolve(datasetB); // le dépassé se résout d'abord : aucun rejeu
+      await vi.advanceTimersByTimeAsync(0);
+      expect(created).toHaveLength(0);
+
+      chargementC.resolve(datasetC);
+      await mode.whenReady();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(created).toHaveLength(1);
+      expect((created[0]!.ring as number[][])[0]![0]).toBeCloseTo(0.9, 6);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('un clic pendant le chargement est différé puis rejoué, sans message', async () => {
     const attente = deferred<Dataset>();
     const notify = vi.fn();
@@ -762,15 +811,39 @@ describe('mode cadastre', () => {
     expect(notify).toHaveBeenCalledTimes(1);
   });
 
-  it('abandonne le clic en attente si la carte a beaucoup bougé', async () => {
+  // Le rejeu ne doit créer que si le point ET l'anneau composé sont dans la vue COURANTE :
+  // buildingsNear / nodesIn ne voient que la vue, hors vue le doublon passerait inaperçu.
+  const rejouerAvecVue = async (vue: [LonLat, LonLat]): Promise<number> => {
     const attente = deferred<Dataset>();
     const mode = createMode(bridge, { loadDataset: () => attente.promise, communeName: async () => 'X', notify: vi.fn() });
     mode.enable();
     await mode.clickAt([0.0005, 0.0005]);
-    bridge.mapExtent = () => [[0.5, 0.5], [0.51, 0.51]];
+    bridge.mapExtent = () => vue;
     attente.resolve(buildDataset('49007', '2026', [feature('01', carre(0, 0))]));
     await mode.whenReady();
-    expect(created).toHaveLength(0);
+    return created.length;
+  };
+
+  it('rejoue le clic quand la vue a peu changé et contient encore l’anneau', async () => {
+    expect(await rejouerAvecVue([[-0.001, -0.001], [0.009, 0.009]])).toBe(1);
+  });
+
+  it('abandonne le clic en attente si la carte a beaucoup bougé', async () => {
+    expect(await rejouerAvecVue([[0.5, 0.5], [0.51, 0.51]])).toBe(0);
+  });
+
+  it('abandonne le clic en attente si un zoom avant a sorti le point de la vue', async () => {
+    expect(await rejouerAvecVue([[0.004, 0.004], [0.006, 0.006]])).toBe(0);
+  });
+
+  it('abandonne le clic donné dans les 30 % gauches si la carte a glissé de 35 %', async () => {
+    // Le centre a bougé de moins d'une demi-étendue, mais le point n'est plus dans la vue.
+    expect(await rejouerAvecVue([[0.0035, 0], [0.0135, 0.01]])).toBe(0);
+  });
+
+  it('abandonne le clic dont l’anneau déborde de la vue, même si le point y est encore', async () => {
+    // Le point (0.0005) est dans la vue, le carré composé (de 0 à 0.001) déborde à gauche.
+    expect(await rejouerAvecVue([[0.0003, 0], [0.0103, 0.01]])).toBe(0);
   });
 
   it('abandonne le clic en attente après 60 s', async () => {

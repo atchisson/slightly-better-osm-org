@@ -105,11 +105,18 @@ d'autre que lire et manipuler la page d'édition elle-même.
   créé dès que les données arrivent, même si `Ctrl` est relâché entre-temps. C'est une
   exception délibérée à « jamais de création à l'aveugle » : le clic rejoué saute
   l'aperçu au survol, mais garde les refus de composition et le contrôle de doublon.
+  Le clic en attente est abandonné, sans message, si la vue de la carte ne le contient
+  plus au moment du rejeu (zoom ou panoramique, même partiel, ou anneau qui déborde de la
+  vue : le contrôle de doublon ne voit que la vue courante), au bout de 60 s, ou si le
+  chargement échoue (une seule notification).
 - **Les piscines aussi, et les autres surfaces du fond cadastre.** Elles ne sont pas dans
   la couche des bâtiments du cadastre mais dans celle des surfaces topographiques
   (`tsurf`). Toutes ces surfaces sont désormais créables : piscine si le code symbole
   est 65, sinon une surface générique créée avec `area=yes` + `source` seulement (le
-  cadastre n'en dit pas davantage de fiable). Une surface à cour intérieure devient un
+  cadastre n'en dit pas davantage de fiable). **Non vérifié contre un vrai iD** : d'après
+  son code source, iD peut continuer à signaler « tags incomplets » (l'erreur ignore la
+  clé `area`, et `source` n'est pas descriptif) et bloquer l'envoi tant que la surface
+  n'est pas qualifiée ou supprimée. Une surface à cour intérieure devient un
   multipolygone, comme un bâtiment.
 
   Une piscine se survole et se clique comme le reste : elle est créée avec
@@ -347,6 +354,11 @@ vérifier après chaque mise à jour d'iD ou d'osm.org.
   l'emporte. Quelques polygones restent inaccessibles parce qu'un plus petit les recouvre
   sur tous les points d'essai (3 surfaces à Angers, 36 objets au Lavandou) : voir le
   document de mesure cité plus haut.
+- **Bâtiment dans la cour d'un bâtiment déjà multipolygone.** Une fois un bâtiment à cour
+  présent dans OSM sous forme de multipolygone, un bâtiment qui remplit sa cour est refusé
+  comme doublon (`ExistingBuilding` ne porte pas les anneaux intérieurs, et les voies
+  intérieures sont ignorées par `nodesIn`). Créer d'abord le bâtiment intérieur, puis
+  celui à cour, fonctionne.
 - **Aucun remplacement de géométrie sur un bâtiment OSM existant.** Cette version
   refuse systématiquement plutôt que de proposer une mise à jour de contour — voir
   « après la v1 » dans le document de conception pour l'évolution prévue.

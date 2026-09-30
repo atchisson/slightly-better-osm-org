@@ -1182,6 +1182,10 @@ describe('createBuilding — les entités d’iD sont des classes', () => {
     try {
       expect(() => makeBridge(ctx).createBuilding(carre, { building: 'yes' },
         [null, null, null, null])).not.toThrow();
+      const actions = (ctx.perform.mock.calls[0] as any[]).filter(x => x && typeof x === 'object');
+      const voies = actions.filter(x => x.nodes);
+      expect(voies).toHaveLength(1);
+      expect(voies[0].tags).toEqual({ building: 'yes' });
     } finally {
       delete (globalThis as any).iD;
     }
