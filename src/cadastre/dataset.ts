@@ -1,7 +1,7 @@
 import { buildEdgeIndex } from '../geometry/edges';
 import { absorptionMap, lightComponents } from '../geometry/components';
 import type { LightComponent } from '../geometry/components';
-import { pointInPoly } from '../geometry/union';
+import { pointInPoly, ringArea } from '../geometry/union';
 import { SYM_PISCINE } from './download';
 import type { BatType, LonLat, Poly, Ring } from '../geometry/types';
 
@@ -106,6 +106,10 @@ export function buildDataset(
   const components = lightComponents(polys, edgeIndex);
   const absorption = absorptionMap(components);
   const byId = new Map(polys.map(p => [p.id, p]));
+  const area = new Map(polys.map(p => [
+    p.id,
+    Math.abs(ringArea(p.outer)) - p.holes.reduce((a, h) => a + Math.abs(ringArea(h)), 0),
+  ]));
   const lightIndex = buildLightIndex(components);
 
   // grille uniforme : chaque polygone est inscrit dans toutes les cases que sa bbox recouvre
@@ -135,12 +139,19 @@ export function buildDataset(
     absorption,
     byId,
     lightIndex,
+    /**
+     * Quand plusieurs polygones se recouvrent au point visé, le PLUS PETIT l'emporte : le
+     * premier de la case masquait sinon tout polygone qui lui est superposé (une piscine
+     * dans sa surface, un bâtiment sous un autre). Égalité : le plus petit identifiant.
+     */
     polyAt(pt: LonLat): Poly | null {
+      let best: Poly | null = null;
       for (const id of grid.get(cellKey(pt[0], pt[1])) ?? []) {
         const p = polys[id]!;
-        if (pointInPoly(pt, p)) return p;
+        if (!pointInPoly(pt, p)) continue;
+        if (!best || area.get(p.id)! < area.get(best.id)!) best = p;
       }
-      return null;
+      return best;
     },
 
     polysNear([[minX, minY], [maxX, maxY]]: [LonLat, LonLat]): Poly[] {

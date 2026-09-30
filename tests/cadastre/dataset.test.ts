@@ -188,3 +188,12 @@ describe('surfaces', () => {
     expect(ds.polyAt([0.0205, 0.0005])?.type).toBe('surface');
   });
 });
+
+describe('polyAt — polygones superposés', () => {
+  it('rend le plus petit : une piscine posée dans sa surface reste cliquable', () => {
+    const ds = buildDataset('49007', '2026', [],
+      [surf('34', carre(0, 0, 0.01)), surf('65', carre(0.004, 0.004, 0.001))]);
+    expect(ds.polyAt([0.0045, 0.0045])?.type).toBe('piscine');
+    expect(ds.polyAt([0.001, 0.001])?.type).toBe('surface');
+  });
+});

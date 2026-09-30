@@ -100,9 +100,15 @@ d'autre que lire et manipuler la page d'édition elle-même.
   s'affiche, le greffon est armé.
 - Cliquer crée le bâtiment dans iD, sélectionné, prêt à recevoir ses tags — comme pour
   tout objet tracé à la main.
-- **Les piscines aussi.** Elles ne sont pas dans la couche des bâtiments du cadastre
-  mais dans celle des surfaces topographiques (`tsurf`), d'où elles sont reconnues à
-  leur code symbole. Survolez-en une, cliquez : elle est créée avec
+- **Clic pendant le chargement.** Si les données de la commune ne sont pas encore là, le
+  clic n'est pas perdu ni refusé : un bandeau « chargement » s'affiche et l'objet est
+  créé dès que les données arrivent, même si `Ctrl` est relâché entre-temps.
+- **Les piscines aussi, et les autres surfaces du fond cadastre.** Elles ne sont pas dans
+  la couche des bâtiments du cadastre mais dans celle des surfaces topographiques
+  (`tsurf`). Toutes ces surfaces sont désormais créables : piscine si le code symbole
+  est 65, sinon une surface générique créée avec `area=yes` + `source` seulement (le
+  cadastre n'en dit pas davantage de fiable). Une surface à cour intérieure devient un
+  multipolygone, comme un bâtiment. Une piscine est reconnue à son code symbole. Survolez-en une, cliquez : elle est créée avec
   `leisure=swimming_pool` + `access=private`, et la même attribution que tout le reste.
   Une piscine ne fusionne jamais avec rien — ni avec un bâtiment, ni avec l'abri de
   jardin qui la borde — et son contrôle de doublon la compare aux piscines déjà
@@ -278,27 +284,29 @@ l'erreur ; c'est un garde-fou qui la rend visible.
 Le greffon refuse plutôt que de créer une géométrie approximative ou à moitié
 construite, dans chacun des cas suivants (chacun avec son propre message) :
 
-| Cas | Mesuré sur Angers |
+| Cas | Mesuré sur Angers (clic au centre de chacun des 50 707 polygones de la couche bâtiments) |
 |---|---|
-| Géométrie source à trou (cour intérieure cadastrale, avant toute composition) | 186 / 50 740 bâtiments (0,4 %), tous types confondus |
 | Polygone dégénéré (aire nulle, ou moins de trois sommets distincts) | 0 dans ce jeu — garde défensive, se teste sur anneaux synthétiques |
-| Ancre ou membre absorbé porteur d'un trou (refus `trou-source` à la composition) | 176 / 37 848 bâtiments en dur |
-| Union des composantes produisant un trou (refus `trou`) | 55 / 37 848 |
-| Union produisant plusieurs parties séparées (refus `parties-multiples`) | 0 / 37 848 |
-| Contour qui se pince sur lui-même après union (refus `pincement`) | 76 / 37 848 |
+| Polygone à trou fusionné avec une construction légère (refus `trou-source`) | 193 (0,4 %) |
+| Union des composantes produisant un trou (refus `trou`) | 156 (0,3 %) |
+| Union produisant plusieurs parties séparées (refus `parties-multiples`) | 0 |
+| Contour qui se pince sur lui-même après union (refus `pincement`) | 82 (0,2 %) |
+| Contours qui se chevauchent (refus `chevauchement`) | 83 (0,2 %) |
 | Bâtiment OSM déjà présent à l'endroit cliqué | non mesuré à l'échelle d'une commune |
 | Commune introuvable ou hors couverture du cadastre français | — |
 | Réseau coupé / données cadastre indisponibles | — |
 | Clic pendant le chargement des données d'une commune (rien n'est créé sans qu'un contour ait été montré au survol) | — |
 | Contexte iD non capturé au démarrage (voir plus bas) | — |
 
-Au total, sur les 37 848 bâtiments en dur d'Angers pris comme ancre, la composition
-(les quatre refus géométriques ci-dessus : `trou-source`, `trou`, `parties-multiples`,
-`pincement`) échoue pour 307 d'entre eux — environ **0,8 %**. Ce chiffre ne couvre pas
-les refus « bâtiment déjà présent », qui dépendent de ce qui est déjà cartographié
-autour, ni les échecs réseau ou de couverture. Cliquer en dehors de tout bâtiment
-cadastral n'est pas compté comme un refus : c'est le cas le plus courant d'un clic qui
-ne visait rien, traité silencieusement plutôt que par un message d'erreur.
+Au total, sur ces 50 707 polygones, la composition échoue pour 514 d'entre eux — environ
+**1,0 %** (dont 431, soit 0,85 %, pour les quatre refus `trou-source`, `trou`,
+`parties-multiples` et `pincement`). Un polygone seul à cour intérieure n'en fait pas
+partie : il est converti en multipolygone (voir plus bas). Ce chiffre ne couvre pas les
+refus « bâtiment déjà présent », qui dépendent de ce qui est déjà cartographié autour,
+ni les échecs réseau ou de couverture. Cliquer en dehors de tout objet cadastral n'est
+pas compté comme un refus : c'est le cas le plus courant d'un clic qui ne visait rien,
+traité silencieusement plutôt que par un message d'erreur. La mesure sur Angers et Le
+Lavandou est détaillée dans `docs/superpowers/spikes/2026-09-30-objets-non-cliquables.md`.
 
 Si le contexte iD n'est pas capturé au démarrage (voir la note de fiabilité plus bas),
 le greffon entier ne s'active pas : `Ctrl` n'arme rien, et un message en console
@@ -325,9 +333,16 @@ vérifier après chaque mise à jour d'iD ou d'osm.org.
 
 ## Limites connues de cette version
 
-- **Géométries à trou refusées, pas converties.** Une cour intérieure cadastrale
-  (0,4 % des bâtiments d'Angers) est refusée avec un message plutôt que transformée en
-  multipolygone OSM. À tracer à la main.
+- **Géométries à trou converties en multipolygones quand le polygone est seul ;
+  refusées quand elles suivent une fusion avec une construction légère.** Une cour
+  intérieure cadastrale sur un polygone seul devient une relation `type=multipolygon`
+  (voie extérieure + voie intérieure, tags sur la relation). Si le bâtiment doit en plus
+  absorber une construction légère voisine, le trou est refusé (`trou-source`, 0,4 % à
+  Angers) plutôt que perdu en silence : à tracer à la main.
+- **Polygones superposés.** Au survol, le plus petit polygone contenant le point
+  l'emporte. Quelques polygones restent inaccessibles parce qu'un plus petit les recouvre
+  sur tous les points d'essai (3 surfaces à Angers, 36 objets au Lavandou) : voir le
+  document de mesure cité plus haut.
 - **Aucun remplacement de géométrie sur un bâtiment OSM existant.** Cette version
   refuse systématiquement plutôt que de proposer une mise à jour de contour — voir
   « après la v1 » dans le document de conception pour l'évolution prévue.
