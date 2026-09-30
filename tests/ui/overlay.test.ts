@@ -91,6 +91,18 @@ describe('overlay', () => {
     expect(d.endsWith('Z')).toBe(true);
   });
 
+  it('dessine les trous dans le même tracé, remplissage evenodd', () => {
+    const conteneur = document.createElement('div');
+    const overlay = createOverlay(fauxBridge(conteneur));
+    const cour: Ring = [[0.2, 0.2], [0.4, 0.2], [0.4, 0.4], [0.2, 0.4], [0.2, 0.2]];
+
+    overlay.show(carre, 'ok', [cour]);
+
+    const path = conteneur.querySelector('path.sb-osm-preview')!;
+    expect(path.getAttribute('d')!.match(/M /g)).toHaveLength(2);
+    expect(path.getAttribute('fill-rule')).toBe('evenodd');
+  });
+
   it('distingue visuellement un refus', () => {
     const o = createOverlay(fauxBridge(container));
     o.show(carre, 'ok');

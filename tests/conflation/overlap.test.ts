@@ -6,6 +6,20 @@ const rect = (x0: number, y0: number, x1: number, y1: number): Ring =>
   [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
 
 describe('overlapsExisting', () => {
+  it('ne compte pas comme doublon un bâtiment entièrement dans la cour', () => {
+    const dansLaCour = [{ id: 'w1', ring: rect(0.00031, 0.00031, 0.00069, 0.00069) }];
+    const cour = rect(0.0003, 0.0003, 0.0007, 0.0007);
+    const anneau = rect(0, 0, 0.001, 0.001);
+    expect(overlapsExisting(anneau, dansLaCour)?.id).toBe('w1');
+    expect(overlapsExisting(anneau, dansLaCour, undefined, [cour])).toBeNull();
+  });
+
+  it('reste un doublon quand l’existant déborde de la cour sur le bâti', () => {
+    const chevauche = [{ id: 'w1', ring: rect(0.0002, 0.0002, 0.0008, 0.0008) }];
+    const cour = rect(0.0003, 0.0003, 0.0007, 0.0007);
+    expect(overlapsExisting(rect(0, 0, 0.001, 0.001), chevauche, undefined, [cour])?.id).toBe('w1');
+  });
+
   it('ne voit aucun conflit sur un terrain vierge', () => {
     expect(overlapsExisting(rect(0, 0, 0.001, 0.001), [])).toBeNull();
   });

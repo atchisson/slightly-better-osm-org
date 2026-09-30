@@ -4,10 +4,11 @@ export interface CachedCommune {
   fetchedAt: number;
   features: unknown[];
   /**
-   * Piscines de la commune (couche `tsurf`). Optionnelle : une entrée écrite avant
-   * leur prise en charge n'en a pas, et doit rester lisible — la faire expirer
-   * obligerait à retélécharger des dizaines de mégaoctets pour un ajout mineur.
+   * Surfaces de la commune (couche `tsurf`, tous codes). Optionnelle : une entrée écrite
+   * avant leur prise en charge n'en a pas et doit rester lisible.
    */
+  surfaces?: unknown[];
+  /** Ancien champ (piscines seules) : relu par personne, écrasé au prochain complément. */
   piscines?: unknown[];
 }
 

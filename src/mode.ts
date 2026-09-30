@@ -1,16 +1,17 @@
 import { composeAt } from './compose';
 import type { Composition } from './compose';
 import { buildDataset, type Dataset } from './cadastre/dataset';
-import { downloadCommune, downloadPiscinesForYear } from './cadastre/download';
+import { downloadCommune, downloadSurfacesForYear } from './cadastre/download';
 import { readCache, writeCache } from './cadastre/store';
 import { communeAt } from './cadastre/insee';
 import { overlapsExisting } from './conflation/overlap';
 import { snapToExistingNodes, planInsertions, DEFAULT_SNAP_TOLERANCE_M } from './conflation/snap';
 import { dilatedExtent } from './geometry/edges';
-import { buildingTags, poolTags, changesetComment, changesetSource } from './tagging/tags';
+import { buildingTags, poolTags, surfaceTags, changesetComment, changesetSource } from './tagging/tags';
 import { createOverlay, type Overlay } from './ui/overlay';
+import { createLoadingBanner, type LoadingBanner } from './ui/loading';
 import { refusalMessage } from './ui/messages';
-import type { IdBridge } from './bridge/types';
+import type { IdBridge, HoleSpec } from './bridge/types';
 import type { LonLat } from './geometry/types';
 
 export interface ModeDeps {
@@ -71,37 +72,51 @@ class CommuneIntrouvableError extends Error {
  */
 const RELOAD_DEBOUNCE_MS = 500;
 
+/**
+ * Âge au-delà duquel un clic mémorisé pendant un chargement n'est plus rejoué : la
+ * personne a sans doute renoncé, et créer un bâtiment une minute plus tard serait une
+ * surprise, pas un service.
+ */
+const ATTENTE_MAX_MS = 60_000;
+
 async function defaultLoadDataset(pt: LonLat): Promise<Dataset> {
   const commune = await communeAt(pt[1], pt[0]);
   if (!commune) throw new CommuneIntrouvableError();
   const cached = await readCache(commune.code);
   if (cached) {
-    // Une entrée écrite avant la prise en charge des piscines n'en porte aucune. Sans
-    // ce complément, la fonctionnalité n'existerait pas — en silence — pour quiconque
-    // a déjà utilisé le greffon sur cette commune, et jusqu'à l'expiration du cache.
-    let piscines = cached.piscines;
-    if (piscines === undefined) {
-      piscines = await downloadPiscinesForYear(cached.insee, cached.millesime);
-      console.log(
-        `[sb-osm] ${piscines.length} piscine(s) ajoutées au cache de ${cached.insee} ` +
-        '(entrée écrite avant leur prise en charge).',
-      );
-      void writeCache({ ...cached, piscines }).catch(() => { /* confort, jamais bloquant */ });
+    // Une entrée écrite avant la prise en charge des surfaces n'en porte aucune (ou
+    // seulement des piscines). Sans ce complément, la fonctionnalité n'existerait pas —
+    // en silence — pour quiconque a déjà utilisé le greffon sur cette commune.
+    let surfaces = cached.surfaces;
+    if (surfaces === undefined) {
+      const complement = await downloadSurfacesForYear(cached.insee, cached.millesime);
+      console.log(`[sb-osm] ${complement.length} surface(s) ajoutées au cache de ${cached.insee}.`);
+      if (complement.length > 0) {
+        surfaces = complement;
+        const { piscines: _ancien, ...reste } = cached;
+        void writeCache({ ...reste, surfaces }).catch(() => { /* confort, jamais bloquant */ });
+      } else {
+        // Un complément vide est peut-être une panne : on ne l'écrit pas, pour retenter
+        // au prochain chargement plutôt que de figer « aucune surface » jusqu'à
+        // expiration. Pour cette session, on garde les piscines de l'ancien format
+        // plutôt que de les perdre.
+        surfaces = (cached.piscines ?? []) as typeof complement;
+      }
     }
-    return buildDataset(cached.insee, cached.millesime, cached.features, piscines);
+    return buildDataset(cached.insee, cached.millesime, cached.features, surfaces);
   }
-  const { features, piscines, millesime } = await downloadCommune(commune.code);
+  const { features, surfaces, millesime } = await downloadCommune(commune.code);
   // Le cache est un confort, jamais une condition du chargement : il est délibérément
   // HORS du chemin de retour. `await writeCache(...)` faisait échouer tout le
   // chargement APRÈS un téléchargement réussi si IndexedDB refusait l'écriture — un
   // dépassement de quota, vraisemblable sur Paris ou Marseille et leur centaine de Mo
   // de features sérialisées — et la personne lisait alors « vérifiez votre connexion »
   // alors que le réseau avait parfaitement fonctionné.
-  void writeCache({ insee: commune.code, millesime, fetchedAt: Date.now(), features, piscines })
+  void writeCache({ insee: commune.code, millesime, fetchedAt: Date.now(), features, surfaces })
     .catch(err => console.warn(
       '[sb-osm] mise en cache impossible (les données restent utilisables, elles seront ' +
       'retéléchargées à la prochaine session) :', err));
-  return buildDataset(commune.code, millesime, features, piscines);
+  return buildDataset(commune.code, millesime, features, surfaces);
 }
 
 export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): CadastreMode {
@@ -131,6 +146,14 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
    * « même commune ? » répondrait faux une seconde fois.
    */
   let loadingInsee: string | null = null;
+  /**
+   * Le dernier clic donné pendant un chargement, rejoué à sa fin. Un seul : deux clics
+   * successifs visent le même objet, et rejouer les deux créerait un doublon.
+   * Il survit à disable() — le mode n'est armé que tant que Ctrl est enfoncé, et la
+   * personne qui relâche Ctrl avant la fin du chargement a bien cliqué.
+   */
+  let attente: { pt: LonLat; depuis: number } | null = null;
+  let banniere: LoadingBanner | null = null;
 
   /**
    * Notifie une panne, sauf si c'est exactement la même que la précédente.
@@ -174,10 +197,12 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       })
       .catch(err => {
         if (loading !== p) return; // une charge plus récente a déjà pris le relais
+        attente = null; // pas de données, donc rien à rejouer : la panne est signalée une fois
         notifyFailure(err instanceof CommuneIntrouvableError ? 'commune-introuvable' : 'reseau');
       })
-      .finally(() => { if (loading === p) loading = null; });
+      .finally(() => { if (loading === p) loading = null; rejouerSiPret(); });
     loading = p;
+    majBanniere();
     return p;
   };
 
@@ -194,11 +219,10 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
     // immédiatement dès que `dataset` existait, MÊME si `loading` pointait vers un
     // rechargement en cours pour une AUTRE commune.
     //
-    // Revue finale : clickAt ne passe plus par ici pour attendre — il refuse tout court
-    // quand un chargement est en vol (I3, « jamais de création à l'aveugle »). Les
-    // appelants restants sont `enable()` et le clic qui RELANCE un chargement après un
-    // échec ; la garde reste juste pour eux : ne jamais lancer un second chargement
-    // par-dessus un chargement déjà en vol.
+    // clickAt ne passe plus par ici pour attendre : il mémorise son clic (`attente`) et
+    // le rejoue à la fin du chargement. Les appelants restants sont `enable()` et le clic
+    // qui RELANCE un chargement après un échec ; la garde reste juste pour eux : ne
+    // jamais lancer un second chargement par-dessus un chargement déjà en vol.
     while (loading !== null) await loading;
     if (dataset) return;
     await startLoad(pt, d => { dataset = d; });
@@ -310,6 +334,140 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
     });
   };
 
+  /**
+   * Doublon éventuel d'une composition : un objet OSM de MÊME nature qui couvre déjà
+   * l'empreinte (cours exclues). Partagé par le survol et le clic pour qu'ils ne
+   * divergent jamais — le survol comparait auparavant à tous les objets.
+   */
+  const doublonDe = (r: Extract<Composition, { ok: true }>, extent: [LonLat, LonLat]) => {
+    const existants = bridge.buildingsNear(extent)
+      .filter(b => (b.kind ?? 'batiment') === r.nature);
+    return overlapsExisting(r.ring, existants, undefined, r.holes);
+  };
+
+  /** Le bandeau suit l'état : chargement en vol (mode armé) ou clic en attente. */
+  const majBanniere = (): void => {
+    const visible = attente !== null || (enabled && loading !== null);
+    if (visible) (banniere ??= createLoadingBanner(bridge)).show();
+    else banniere?.hide();
+  };
+
+  /** Le point est-il dans la vue courante de la carte ? */
+  const dansLaVue = (pt: LonLat): boolean => {
+    const [[x0, y0], [x1, y1]] = bridge.mapExtent();
+    return pt[0] >= x0 && pt[0] <= x1 && pt[1] >= y0 && pt[1] <= y1;
+  };
+
+  /**
+   * Rejoue le clic mémorisé quand les données sont là. Abandonné sans bruit s'il est trop
+   * vieux ou si la vue courante ne le contient plus (zoom, panoramique, même partiel) :
+   * la personne ne regarde plus cet endroit, et surtout `bridge.buildingsNear` et
+   * `bridge.nodesIn` ne voient QUE la vue courante — hors vue, le contrôle de doublon, le
+   * recalage et l'insertion dans les murs ne verraient rien et un doublon serait publié.
+   * `creer` exige en plus que l'anneau composé tienne entièrement dans la vue.
+   */
+  const rejouerSiPret = (): void => {
+    if (loading !== null || !dataset || !attente) { majBanniere(); return; }
+    const a = attente;
+    attente = null;
+    majBanniere();
+    if (Date.now() - a.depuis > ATTENTE_MAX_MS || !dansLaVue(a.pt)) return;
+    void creer(a.pt, true);
+  };
+
+  /**
+   * Crée l'objet sous `pt` contre le jeu de données courant. Ne teste pas `enabled` : le
+   * rejeu d'un clic mémorisé doit marcher mode désarmé (Ctrl relâché entre-temps).
+   *
+   * Contrat du clic (spec §1). L'ancienne règle « jamais de création à l'aveugle » —
+   * refuser tout clic pendant un chargement, parce que hoverAt cache alors l'aperçu et
+   * que l'aperçu est le seul garde-fou contre une annexion erronée (spec §5) — perdait
+   * des clics et laissait un mode d'apparence inerte. Elle est assouplie sciemment : le
+   * clic est mémorisé (un seul) et rejoué à la fin du chargement, contre des données à
+   * jour, à condition que la vue courante contienne encore le clic (et l'anneau composé) et que l'attente n'ait pas
+   * dépassé ATTENTE_MAX_MS. L'écart assumé : l'objet créé au rejeu n'a pas été
+   * prévisualisé ; le bandeau de chargement dit pourquoi rien n'apparaît, et la personne
+   * peut annuler (Ctrl+Z). Passé les gardes de clickAt, PLUS AUCUNE attente ne précède
+   * `createBuilding` : aucune fenêtre où l'état changerait entre décision et création.
+   */
+  const creer = async (pt: LonLat, exigerDansLaVue = false): Promise<void> => {
+    const ds = dataset;
+    if (!ds) return;
+    const r = compose(pt);
+    if (!r) return;
+    if (!r.ok) {
+      // 'aucun-batiment' n'est pas notifié : cliquer en dehors de tout bâtiment
+      // cadastre est le cas le plus fréquent d'un clic hors cible, pas une erreur.
+      if (r.reason !== 'aucun-batiment') notify(refusalMessage(r.reason));
+      return;
+    }
+    if (exigerDansLaVue) {
+      // Rejeu d'un clic différé : la vue a pu changer depuis. Un anneau qui déborde de la
+      // vue courante ne serait qu'en partie visible de buildingsNear / nodesIn : le
+      // contrôle de doublon serait aveugle. On abandonne sans message (le clic direct,
+      // lui, est toujours dans la vue au moment où il est donné).
+      const [[x0, y0], [x1, y1]] = bridge.mapExtent();
+      if (r.ring.some(([x, y]) => x < x0 || x > x1 || y < y0 || y > y1)) return;
+    }
+    // Un objet ne fait doublon qu'avec un objet de même nature (voir doublonDe). Sans
+    // ce filtre, une piscine serait déclarée déjà cartographiée à cause de la maison
+    // qui la borde, et une piscine déjà présente dans OSM passerait inaperçue.
+    if (doublonDe(r, bridge.mapExtent())) {
+      notify(refusalMessage('batiment-existant'));
+      return;
+    }
+    // Les sommets à recoudre sont les COINS de l'anneau composé, pas le point cliqué :
+    // on interroge donc l'emprise de l'anneau, dilatée de la tolérance de recalage.
+    // Interroger un rayon autour du clic (ce que faisait la version précédente)
+    // ne ramenait aucun candidat sur une maison de taille ordinaire — ses coins sont
+    // à 4,56 m du centre sur chaque axe pour une médiane d'Angers, la boîte faisait
+    // ±2,70 m en longitude — donc la réutilisation de nœuds ne se déclenchait
+    // pratiquement jamais, sans le moindre message. Voir IdBridge.nodesIn.
+    const snapped = snapToExistingNodes(
+      r.ring,
+      bridge.nodesIn(dilatedExtent(r.ring, DEFAULT_SNAP_TOLERANCE_M)),
+      DEFAULT_SNAP_TOLERANCE_M);
+    // Les cours se recousent aux nœuds existants (le bâtiment de la cour partage ses
+    // murs avec le trou) mais sans insertion dans un mur : on ne touche pas aux
+    // objets voisins pour une cour.
+    const trous: HoleSpec[] = r.holes.map(h => {
+      const s = snapToExistingNodes(h, bridge.nodesIn(dilatedExtent(h, DEFAULT_SNAP_TOLERANCE_M)),
+        DEFAULT_SNAP_TOLERANCE_M);
+      return { ring: s.ring, reused: s.reused };
+    });
+    // Capturé AVANT la création : un rechargement de commune peut remplacer `dataset`
+    // pendant l'attente du nom de commune, et l'attribution doit rester celle du jeu
+    // de données qui a réellement produit cette géométrie.
+    const millesime = ds.millesime;
+    const tags = r.nature === 'piscine' ? poolTags(millesime)
+      : r.nature === 'surface' ? surfaceTags(millesime)
+      : buildingTags({ isolatedLight: r.isolatedLight, millesime });
+
+    // Un sommet qui n'a trouvé aucun nœud à réutiliser mais qui tombe sur le MUR
+    // d'un bâtiment OSM existant y est inséré : les deux bâtiments partagent alors
+    // réellement leur paroi, au lieu de deux murs superposés sans nœud commun.
+    // C'est la seule opération du greffon qui modifie un objet existant, et elle
+    // est bornée à 20 cm — au-delà, on déformerait le bâtiment d'autrui plutôt que
+    // de recoudre un mur commun. Voir planInsertions et le README.
+    const insertions = planInsertions(
+      snapped.ring,
+      snapped.reused,
+      bridge.buildingsNear(dilatedExtent(snapped.ring, DEFAULT_SNAP_TOLERANCE_M))
+        .filter(b => (b.kind ?? 'batiment') === r.nature),
+      DEFAULT_SNAP_TOLERANCE_M);
+
+    bridge.createBuilding(snapped.ring, tags, snapped.reused, insertions, trous);
+    overlay?.hide();
+
+    // Après la création seulement : le préremplissage du changeset est une obligation
+    // d'attribution (Licence Ouverte, §7), pas une condition de création. Il ne doit
+    // ni retarder l'effet visible du clic, ni être annulé parce que le mode a été
+    // coupé entre-temps — le bâtiment, lui, existe. Un échec de résolution du nom ne
+    // doit pas davantage faire échouer la promesse de clickAt après coup.
+    const nom = await communeName(pt).catch(() => '');
+    bridge.prefillChangeset(changesetComment(nom), changesetSource(millesime));
+  };
+
   return {
     isEnabled: () => enabled,
 
@@ -323,6 +481,7 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       lastFailureReason = null;
       overlay = createOverlay(bridge);
       void ensureDataset(centreOf(bridge.mapExtent()));
+      majBanniere();
       // Le rechargement au franchissement de frontière (spec §3.3) : voir
       // scheduleReload(). Désabonné dans disable(), comme le fait déjà createOverlay()
       // pour son propre abonnement à onMapMove — même discipline, même contrat.
@@ -344,6 +503,7 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       // de carte pendant que le mode est censé être éteint.
       overlay?.destroy();
       overlay = null;
+      majBanniere(); // reste visible si un clic attend encore son chargement
     },
 
     whenReady: () => loading ?? Promise.resolve(),
@@ -364,8 +524,8 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       // qui ne porte jamais de ring) empruntent le même chemin : rien à montrer de
       // vrai, donc on efface plutôt que de laisser un contour périmé à l'écran.
       if (!r || !r.ok) { overlay.hide(); return; }
-      const conflit = overlapsExisting(r.ring, bridge.buildingsNear(bridge.mapExtent()));
-      overlay.show(r.ring, conflit ? 'refus' : 'ok');
+      const conflit = doublonDe(r, bridge.mapExtent());
+      overlay.show(r.ring, conflit ? 'refus' : 'ok', r.holes);
     },
 
     hoverEnd() {
@@ -375,92 +535,17 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
 
     async clickAt(pt) {
       if (!enabled) return;
-
-      // Jamais de création à l'aveugle.
-      //
-      // Cette fonction attendait `ensureDataset(pt)`. Or pendant toute cette attente,
-      // `hoverAt` cachait l'aperçu (`loading !== null`) : le bâtiment finalement créé
-      // n'avait JAMAIS été prévisualisé. La spec est explicite (§5) — l'aperçu au survol
-      // est le seul garde-fou contre une annexion erronée ; créer sans lui, c'est créer
-      // sans garde-fou. Et `enabled` n'était pas revérifié après l'attente : couper le
-      // mode pendant ce délai n'empêchait pas la création.
-      //
-      // On préfère donc « ne jamais créer à l'aveugle » à « ne jamais perdre un clic » :
-      // si un chargement est en vol, on ne crée rien et on le dit ; la personne
-      // recliquera quand elle verra un contour. La contrepartie est acquise dès
-      // l'entrée : passé ces deux gardes, plus AUCUNE attente ne précède
-      // `createBuilding` — il n'y a donc plus de fenêtre où l'état pourrait changer
-      // entre la décision et la création, et plus rien à revérifier après un await.
-      if (loading !== null) { notify(refusalMessage('chargement-en-cours')); return; }
-      if (!dataset) {
-        // Rien de chargé et rien en vol : le premier chargement a échoué, ou n'a jamais
-        // eu lieu. Le clic le relance (sans l'attendre) plutôt que de ne rien faire du
-        // tout, ce qui laisserait un mode définitivement inerte après une panne réseau.
-        void ensureDataset(pt);
-        notify(refusalMessage('chargement-en-cours'));
+      // Pendant un chargement (ou sans jeu de données après une panne), on ne crée rien
+      // à l'aveugle mais on ne perd pas le clic : il est mémorisé et rejoué dès que les
+      // données sont là, sans message. Une panne précédente est oubliée avant de
+      // relancer, pour que sa répétition soit signalée à nouveau.
+      if (loading !== null || !dataset) {
+        attente = { pt, depuis: Date.now() };
+        if (loading === null) { lastFailureReason = null; void ensureDataset(pt); }
+        majBanniere();
         return;
       }
-
-      const r = compose(pt);
-      if (!r) return;
-      if (!r.ok) {
-        // 'aucun-batiment' n'est pas notifié : cliquer en dehors de tout bâtiment
-        // cadastre est le cas le plus fréquent d'un clic hors cible, pas une erreur.
-        if (r.reason !== 'aucun-batiment') notify(refusalMessage(r.reason));
-        return;
-      }
-      // Un objet ne fait doublon qu'avec un objet de même nature. Sans ce filtre, une
-      // piscine serait déclarée déjà cartographiée à cause de la maison qui la borde,
-      // et une piscine déjà présente dans OSM passerait inaperçue.
-      const memeNature = (b: { kind?: string }): boolean =>
-        (b.kind === 'piscine') === r.isPiscine;
-      const existants = bridge.buildingsNear(bridge.mapExtent()).filter(memeNature);
-      if (overlapsExisting(r.ring, existants)) {
-        notify(refusalMessage('batiment-existant'));
-        return;
-      }
-      // Les sommets à recoudre sont les COINS de l'anneau composé, pas le point cliqué :
-      // on interroge donc l'emprise de l'anneau, dilatée de la tolérance de recalage.
-      // Interroger un rayon autour du clic (ce que faisait la version précédente)
-      // ne ramenait aucun candidat sur une maison de taille ordinaire — ses coins sont
-      // à 4,56 m du centre sur chaque axe pour une médiane d'Angers, la boîte faisait
-      // ±2,70 m en longitude — donc la réutilisation de nœuds ne se déclenchait
-      // pratiquement jamais, sans le moindre message. Voir IdBridge.nodesIn.
-      const snapped = snapToExistingNodes(
-        r.ring,
-        bridge.nodesIn(dilatedExtent(r.ring, DEFAULT_SNAP_TOLERANCE_M)),
-        DEFAULT_SNAP_TOLERANCE_M);
-      // Capturé AVANT la création : un rechargement de commune peut remplacer `dataset`
-      // pendant l'attente du nom de commune, et l'attribution doit rester celle du jeu
-      // de données qui a réellement produit cette géométrie.
-      const millesime = dataset.millesime;
-      const tags = r.isPiscine
-        ? poolTags(millesime)
-        : buildingTags({ isolatedLight: r.isolatedLight, millesime });
-
-      // Un sommet qui n'a trouvé aucun nœud à réutiliser mais qui tombe sur le MUR
-      // d'un bâtiment OSM existant y est inséré : les deux bâtiments partagent alors
-      // réellement leur paroi, au lieu de deux murs superposés sans nœud commun.
-      // C'est la seule opération du greffon qui modifie un objet existant, et elle
-      // est bornée à 20 cm — au-delà, on déformerait le bâtiment d'autrui plutôt que
-      // de recoudre un mur commun. Voir planInsertions et le README.
-      const insertions = planInsertions(
-        snapped.ring,
-        snapped.reused,
-        bridge.buildingsNear(dilatedExtent(snapped.ring, DEFAULT_SNAP_TOLERANCE_M))
-          .filter(memeNature),
-        DEFAULT_SNAP_TOLERANCE_M);
-
-      bridge.createBuilding(snapped.ring, tags, snapped.reused, insertions);
-      overlay?.hide();
-
-      // Après la création seulement : le préremplissage du changeset est une obligation
-      // d'attribution (Licence Ouverte, §7), pas une condition de création. Il ne doit
-      // ni retarder l'effet visible du clic, ni être annulé parce que le mode a été
-      // coupé entre-temps — le bâtiment, lui, existe. Un échec de résolution du nom ne
-      // doit pas davantage faire échouer la promesse de clickAt après coup.
-      const nom = await communeName(pt).catch(() => '');
-      bridge.prefillChangeset(changesetComment(nom), changesetSource(millesime));
+      await creer(pt);
     },
   };
 }

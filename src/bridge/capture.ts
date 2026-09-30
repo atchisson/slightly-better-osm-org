@@ -1,4 +1,4 @@
-import type { IdBridge } from './types';
+import type { HoleSpec, IdBridge } from './types';
 import type { ExistingBuilding } from '../conflation/overlap';
 import type { ExistingNode, Insertion } from '../conflation/snap';
 import type { MergePlan, OsmWay } from '../merge';
@@ -331,6 +331,34 @@ function taggedPool(tags: any): boolean {
   return tags?.leisure === 'swimming_pool';
 }
 
+/** Une surface OSM à part entière (`area=yes`), sans autre nature. */
+function taggedSurface(tags: any): boolean {
+  return tags?.area === 'yes';
+}
+
+type NatureOsm = 'batiment' | 'piscine' | 'surface';
+/** La nature d'un objet OSM au sens du contrôle de doublon, ou null s'il n'en est pas un. */
+function natureOf(tags: any): NatureOsm | null {
+  if (taggedPool(tags)) return 'piscine';
+  if (taggedBuilding(tags)) return 'batiment';
+  if (taggedSurface(tags)) return 'surface';
+  return null;
+}
+
+/** Nature portée par une relation, pour ses ways membres (hors rôle `inner`). */
+function relationMemberNatures(entities: any[]): Map<string, NatureOsm> {
+  const out = new Map<string, NatureOsm>();
+  for (const e of entities) {
+    if (e.type !== 'relation') continue;
+    const nature = natureOf(e.tags);
+    if (!nature) continue;
+    for (const m of (e.members ?? []) as any[]) {
+      if (m?.type === 'way' && m.role !== 'inner' && typeof m.id === 'string') out.set(m.id, nature);
+    }
+  }
+  return out;
+}
+
 /**
  * Ways membres (hors rôle `inner`) d'une relation taguée `building`.
  *
@@ -400,16 +428,16 @@ function buildBridge(c: any): IdBridge {
     // ses ways : `e.tags?.building` seul les manquait tous. Or ce sont exactement les
     // bâtiments à cour intérieure que le greffon refuse côté cadastre — donc ceux que
     // quelqu'un a tracés à la main — et créer un doublon par-dessus est précisément la
-    // seule chose que la v1 promet de ne jamais faire.
-    const membresDeRelation = relationBuildingWayIds(entities);
+    // seule chose que la v1 promet de ne jamais faire. Il en va de même des relations
+    // piscine et surface : leurs ways membres (hors `inner`) héritent de leur nature.
+    const naturesRelation = relationMemberNatures(entities);
+    const natureDe = (e: any): NatureOsm | null =>
+      natureOf(e.tags) ?? naturesRelation.get(e.id as string) ?? null;
     buildingCache = entities
-      .filter(e =>
-        e.type === 'way' &&
-        Array.isArray(e.nodes) &&
-        (taggedBuilding(e.tags) || taggedPool(e.tags) || membresDeRelation.has(e.id as string)))
+      .filter(e => e.type === 'way' && Array.isArray(e.nodes) && natureDe(e) !== null)
       .map(e => ({
         id: e.id as string,
-        kind: (taggedPool(e.tags) ? 'piscine' : 'batiment') as 'batiment' | 'piscine',
+        kind: natureDe(e)!,
         ring: (e.nodes as string[]).map(id => graph.entity(id).loc as LonLat),
         // Les nœuds, pas seulement leurs positions : insérer un sommet dans un mur
         // existant se désigne par l'arête `[idA, idB]` qu'il coupe (voir
@@ -563,6 +591,7 @@ function buildBridge(c: any): IdBridge {
       tags: Record<string, string>,
       reused: (string | null)[],
       insertions: (Insertion | null)[] = [],
+      holes: HoleSpec[] = [],
     ): void {
       const iD = (globalThis as any).iD;
       const open = ring.slice(0, -1);
@@ -584,20 +613,48 @@ function buildBridge(c: any): IdBridge {
         else created.push(node);
       });
 
-      const way = instancier(iD.osmWay, { tags, nodes: [...nodeIds, nodeIds[0]!] });
-      // Une seule transaction, dans cet ordre : les nœuds existent avant la voie qui
-      // les référence. Ctrl+Z défait l'ensemble — création ET coutures — en une fois,
-      // ce que la spec exige et qui importe d'autant plus maintenant qu'on touche à
-      // des objets existants.
+      // Les cours : leurs nœuds (réutilisés ou créés) puis une voie chacune, sans tags.
+      const voiesTrous = holes.map(h => {
+        const ids: string[] = [];
+        h.ring.slice(0, -1).forEach((loc, i) => {
+          const existing = h.reused[i];
+          if (existing) { ids.push(existing); return; }
+          const node = instancier(iD.osmNode, { loc });
+          ids.push(node.id);
+          created.push(node);
+        });
+        return instancier(iD.osmWay, { tags: {}, nodes: [...ids, ids[0]!] });
+      });
+
+      const multipolygone = voiesTrous.length > 0;
+      // Avec des cours, les tags vont sur la RELATION : les voies n'en portent aucun.
+      const way = instancier(iD.osmWay,
+        { tags: multipolygone ? {} : tags, nodes: [...nodeIds, nodeIds[0]!] });
+      const relation = multipolygone
+        ? instancier(iD.osmRelation, {
+          tags: { type: 'multipolygon', ...tags },
+          members: [
+            { id: way.id, type: 'way', role: 'outer' },
+            ...voiesTrous.map((v: any) => ({ id: v.id, type: 'way', role: 'inner' })),
+          ],
+        })
+        : null;
+
+      // Une seule transaction, dans cet ordre : nœuds, coutures, voies, relation — chaque
+      // entité existe avant ce qui la référence. Ctrl+Z défait l'ensemble — création ET
+      // coutures — en une fois, ce que la spec exige et qui importe d'autant plus
+      // maintenant qu'on touche à des objets existants.
       const actions = [
         ...created.map(e => instancier(iD.actionAddEntity, e)),
         ...aInserer.map(({ node, edge }) =>
           instancier(iD.actionAddMidpoint, { loc: node.loc, edge }, node)),
         instancier(iD.actionAddEntity, way),
+        ...voiesTrous.map((v: any) => instancier(iD.actionAddEntity, v)),
+        ...(relation ? [instancier(iD.actionAddEntity, relation)] : []),
       ];
       c.perform(...actions, 'Bâtiment depuis le cadastre');
       buildingCache = null; // notre propre modification du graphe invalide le cache
-      c.enter(instancier(iD.modeSelect, c, [way.id]));
+      c.enter(instancier(iD.modeSelect, c, [(relation ?? way).id]));
     },
 
     prefillChangeset(comment: string, source: string): void {

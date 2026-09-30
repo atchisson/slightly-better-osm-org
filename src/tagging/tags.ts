@@ -62,6 +62,24 @@ export function poolTags(millesime: string): Record<string, string> {
   };
 }
 
+/**
+ * Tags d'une surface topographique sans nature connue : `area=yes` seulement.
+ *
+ * Le code symbole cadastral ne se traduit pas de façon fiable en tag OSM, et un tag
+ * inventé est pire que pas de tag. L'intention de `area=yes` est d'éviter la voie
+ * fermée sans tag et de laisser la personne qui édite la qualifier.
+ *
+ * NON VÉRIFIÉ contre un vrai iD : d'après le code source d'iD (validations/missing_tag),
+ * `hasDescriptiveTags` ignore la clé `area` et `source` n'est pas un tag « intéressant »,
+ * et une entité nouvelle en défaut est une erreur que l'interface de validation utilise
+ * pour bloquer l'envoi. L'erreur « tags incomplets » peut donc subsister, et bloquer
+ * l'envoi, tant que la personne n'a pas qualifié ou supprimé la surface (voir
+ * docs/verification-manuelle.md).
+ */
+export function surfaceTags(millesime: string): Record<string, string> {
+  return { area: 'yes', source: SOURCE_PREFIX + requireMillesime(millesime) };
+}
+
 export function changesetComment(commune: string): string {
   return `Bâtiments depuis le cadastre (${commune})`;
 }

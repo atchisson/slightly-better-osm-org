@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildingTags, changesetComment, changesetSource, poolTags } from '../../src/tagging/tags';
+import { buildingTags, changesetComment, changesetSource, poolTags, surfaceTags } from '../../src/tagging/tags';
 
 describe('buildingTags', () => {
   it('pose building=yes et la source verbatim avec le millésime', () => {
@@ -78,5 +78,18 @@ describe('poolTags', () => {
 
   it('refuse un millésime qui n’est pas une année', () => {
     expect(() => poolTags('latest')).toThrow(/millésime/i);
+  });
+});
+
+describe('surfaceTags', () => {
+  it('ne pose que area=yes et la source, aucune sémantique inventée', () => {
+    const t = surfaceTags('2026');
+    expect(Object.keys(t).sort()).toEqual(['area', 'source']);
+    expect(t['area']).toBe('yes');
+    expect(t['source']).toContain('Mise à jour : 2026');
+  });
+
+  it('refuse un millésime qui n’est pas une année', () => {
+    expect(() => surfaceTags('latest')).toThrow(/millésime/i);
   });
 });
