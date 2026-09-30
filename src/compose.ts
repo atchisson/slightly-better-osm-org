@@ -28,6 +28,10 @@ export type RefusalReason =
 export type Composition =
   | {
       ok: true; ring: Ring; anchorId: number; absorbed: number[];
+      /** cours intérieures (anneaux), nettoyées ; vide sauf polygone seul à trou */
+      holes: Ring[];
+      /** nature de l'objet composé, qui décide du tagging */
+      nature: 'batiment' | 'piscine' | 'surface';
       isolatedLight: boolean;
       /** une piscine ne se tague pas comme un bâtiment, et ne fusionne avec rien */
       isPiscine: boolean;
@@ -36,6 +40,7 @@ export type Composition =
 
 const isHard = (p: Poly): boolean => p.type === '01' || p.type === '03';
 const isPiscine = (p: Poly): boolean => p.type === 'piscine';
+const isSurface = (p: Poly): boolean => p.type === 'surface';
 
 const vertexKey = (p: LonLat): string => `${p[0]},${p[1]}`;
 
@@ -119,7 +124,7 @@ function anchorOf(poly: Poly, input: ComposeInput): number {
 function absorbedBy(anchor: Poly, anchorId: number, input: ComposeInput): number[] {
   // Une piscine n'absorbe rien : elle n'est pas un bâtiment, et rien ne doit jamais
   // la réunir à un abri de jardin qui la borde.
-  if (isPiscine(anchor)) return [];
+  if (isPiscine(anchor) || isSurface(anchor)) return [];
   if (isHard(anchor)) return input.absorption.get(anchorId) ?? [];
   const entry = input.lightIndex.get(anchorId);
   if (entry?.ownerId !== null) return [];
@@ -134,39 +139,43 @@ export function composeFor(anchorId: number, input: ComposeInput): Composition {
   const members = [anchor, ...absorbed.map(id => input.byId.get(id)!).filter(Boolean)];
 
   // Contrat de topologicalUnion : elle n'opère que sur les anneaux extérieurs et ne lit
-  // jamais Poly.holes. Un trou porté par N'IMPORTE QUEL membre — l'ancre ou un léger
-  // absorbé — serait donc silencieusement perdu si on laissait passer l'union. D'où le
-  // refus sur l'ensemble des membres, pas seulement sur le polygone visé par l'appelant.
-  if (members.some(p => p.holes.length > 0)) return { ok: false, reason: 'trou-source' };
+  // jamais Poly.holes. Avec PLUSIEURS membres, un trou serait donc silencieusement perdu
+  // par l'union : refus. Un polygone SEUL n'est pas uni à rien — son trou passe tel quel.
+  if (members.length > 1 && members.some(p => p.holes.length > 0)) {
+    return { ok: false, reason: 'trou-source' };
+  }
   if (members.some(p => isDegenerate(p.outer))) return { ok: false, reason: 'degenere' };
 
   const united = topologicalUnion(members);
   if (!united.ok) return { ok: false, reason: united.reason };
 
-  // Les sommets partagés avec un bâtiment voisin sont inamovibles : les supprimer
-  // découdrait le mur mitoyen, en silence (voir sommetsPartages).
-  const partages = sommetsPartages(united.ring, new Set(members.map(m => m.id)), input);
-  const inamovible = (p: LonLat): boolean => partages.has(vertexKey(p));
-  const cleaned = simplify(
-    dropCollinear(united.ring, undefined, inamovible),
-    input.simplifyToleranceM,
-    inamovible,
-  );
+  const idsMembres = new Set(members.map(m => m.id));
+  // Les sommets partagés avec un bâtiment voisin sont inamovibles (voir sommetsPartages),
+  // sur l'anneau extérieur comme sur chaque cour : un bâtiment bâti dans la cour partage
+  // ses murs avec le trou.
+  const nettoie = (ring: Ring): Ring => {
+    const partages = sommetsPartages(ring, idsMembres, input);
+    const inamovible = (p: LonLat): boolean => partages.has(vertexKey(p));
+    return simplify(dropCollinear(ring, undefined, inamovible), input.simplifyToleranceM, inamovible);
+  };
+  const cleaned = nettoie(united.ring);
   if (isDegenerate(cleaned)) return { ok: false, reason: 'degenere' };
+  // Une cour réduite à rien par le nettoyage n'est que du bruit : on l'écarte plutôt
+  // que de refuser le bâtiment.
+  const holes = members.flatMap(m => m.holes).map(nettoie).filter(h => !isDegenerate(h));
 
+  const nature = isPiscine(anchor) ? 'piscine' : isSurface(anchor) ? 'surface' : 'batiment';
   return {
-    ok: true,
-    ring: cleaned,
-    anchorId,
+    ok: true, ring: cleaned, holes, anchorId,
     absorbed: [...absorbed].sort((a, b) => a - b),
-    isolatedLight: !isHard(anchor) && !isPiscine(anchor),
+    isolatedLight: !isHard(anchor) && !isPiscine(anchor) && !isSurface(anchor),
     isPiscine: isPiscine(anchor),
+    nature,
   };
 }
 
 export function composeAt(pt: LonLat, input: ComposeInput): Composition {
   const poly = hit(pt, input);
   if (!poly) return { ok: false, reason: 'aucun-batiment' };
-  if (poly.holes.length > 0) return { ok: false, reason: 'trou-source' };
   return composeFor(anchorOf(poly, input), input);
 }

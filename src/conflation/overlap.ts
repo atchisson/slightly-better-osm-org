@@ -5,14 +5,14 @@ export interface ExistingBuilding {
   id: string;
   ring: Ring;
   /**
-   * Bâtiment ou piscine.
+   * Bâtiment, piscine ou surface générique.
    *
    * Un objet ne fait doublon qu'avec un objet de même nature : une maison qui borde
    * une piscine ne couvre rien de la piscine, et une piscine déjà cartographiée ne
    * serait jamais vue si l'on ne cherchait que des bâtiments. Absent = bâtiment, pour
    * qu'un appelant qui n'a pas à s'en soucier n'ait rien à écrire.
    */
-  kind?: 'batiment' | 'piscine';
+  kind?: 'batiment' | 'piscine' | 'surface';
   /**
    * Les nœuds OSM de ce contour, dans l'ordre de `ring` (donc même longueur, premier
    * et dernier identiques). Ils sont requis pour insérer un sommet DANS le mur de ce
@@ -89,12 +89,15 @@ export const COUVERTURE_REFUS = 0.10;
  * sommet ni le croisement strict d'arêtes ne voyaient. Une mesure de surface s'en
  * moque.
  *
+ * `trous` : les cours de l'empreinte (anneaux intérieurs), exclues de l'échantillonnage.
+ *
  * Le coût n'est engagé qu'au CLIC, jamais au survol.
  */
 export function overlapsExisting(
   ring: Ring,
   existing: ExistingBuilding[],
   seuil: number = COUVERTURE_REFUS,
+  trous: Ring[] = [],
 ): ExistingBuilding | null {
   const candidats = existing.filter(b => !disjoint(ring, b.ring));
   if (candidats.length === 0) return null;
@@ -110,6 +113,9 @@ export function overlapsExisting(
         y0 + ((j + 0.5) / ECHANTILLONS) * (y1 - y0),
       ];
       if (!pointInRing(p, ring)) continue;
+      // Un point dans une cour n'est pas de l'empreinte à créer : un bâtiment qui s'y
+      // trouve n'est pas un doublon de l'objet troué.
+      if (trous.some(t => pointInRing(p, t))) continue;
       dedans++;
       // Le premier candidat qui couvre ce point suffit pour la couverture globale ;
       // on retient lequel, seulement pour pouvoir nommer le principal responsable.

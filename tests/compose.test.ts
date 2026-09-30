@@ -83,12 +83,15 @@ describe('composeAt', () => {
     }
   });
 
-  it('refuse une géométrie source à trou', () => {
-    // On vise l'ancre par son identifiant : partir d'un point serait indéterminé
-    // (un sommet n'est ni franchement dedans ni franchement dehors).
+  it('compose un polygone seul à trou : anneau extérieur et anneau intérieur', () => {
     const polys = fixtures.avecTrou.polys as unknown as Poly[];
     const troue = polys.find(p => p.holes.length > 0)!;
-    expect(composeFor(troue.id, prepare(polys))).toEqual({ ok: false, reason: 'trou-source' });
+    const r = composeFor(troue.id, prepare(polys));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.holes.length).toBeGreaterThanOrEqual(1);
+    expect(r.nature).toBe('batiment');
+    expect(r.absorbed).toEqual([]);
   });
 
   it('refuse aussi quand seul un membre absorbé (et non l’ancre) porte un trou', () => {
@@ -356,6 +359,7 @@ describe('piscines — ni absorbées, ni absorbantes', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.isPiscine).toBe(true);
+    expect(r.nature).toBe('piscine');
     // `isolatedLight` pose `wall=no` : une piscine n'est pas une construction légère.
     expect(r.isolatedLight).toBe(false);
     expect(r.absorbed).toEqual([]);
@@ -373,6 +377,63 @@ describe('piscines — ni absorbées, ni absorbantes', () => {
 
     expect(r.ok).toBe(true);
     if (!r.ok) return;
+    expect(r.absorbed).toEqual([]);
+  });
+});
+
+describe('bâtiments à trous', () => {
+  const trou = (x0: number, y0: number, x1: number, y1: number): [number, number][] =>
+    [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
+  const avecCour = (id = 0): Poly => ({ ...rect(id, '01', 0, 0, 0.001, 0.001),
+    holes: [trou(0.0003, 0.0003, 0.0007, 0.0007)] });
+
+  it('un clic sur le bâti autour de la cour compose le bâtiment', () => {
+    const r = composeAt([0.00005, 0.0005], prepare([avecCour()]));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.holes).toHaveLength(1);
+  });
+
+  it('un clic dans la cour ne compose rien', () => {
+    expect(composeAt([0.0005, 0.0005], prepare([avecCour()])))
+      .toEqual({ ok: false, reason: 'aucun-batiment' });
+  });
+
+  it('écarte un anneau intérieur dégénéré', () => {
+    const p = avecCour();
+    p.holes = [[[0.0003, 0.0003], [0.0005, 0.0003], [0.0007, 0.0003], [0.0003, 0.0003]]];
+    const r = composeFor(0, prepare([p]));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.holes).toEqual([]);
+  });
+
+  it('garde un sommet de la cour partagé avec un bâtiment qui s’y trouve', () => {
+    // Le bâtiment de la cour a un sommet au milieu de son mur sud, colinéaire : sans
+    // protection, dropCollinear le retirerait du trou et découdrait le mur mitoyen.
+    const mur: [number, number][] = [[0.0003, 0.0003], [0.0005, 0.0003], [0.0007, 0.0003],
+      [0.0007, 0.0007], [0.0003, 0.0007], [0.0003, 0.0003]];
+    const cour: Poly = { id: 1, type: '01', outer: mur, holes: [] };
+    const bati: Poly = { ...avecCour(0), holes: [mur] };
+    const r = composeFor(0, prepare([bati, cour]));
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.holes[0]).toContainEqual([0.0005, 0.0003]);
+  });
+
+  it('refuse toujours un trou porté par un membre d’une fusion', () => {
+    const dur = avecCour(0);
+    const leger = rect(1, '02', 0.001, 0, 0.002, 0.001);
+    expect(composeFor(0, prepare([dur, leger]))).toEqual({ ok: false, reason: 'trou-source' });
+  });
+});
+
+describe('surfaces génériques', () => {
+  it('se compose seule, nature surface, ni piscine ni léger isolé', () => {
+    const s = rect(1, 'surface', 0, 0, 0.001, 0.001);
+    const r = composeFor(1, prepare([s, rect(2, '02', 0.001, 0, 0.002, 0.001)]));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.nature).toBe('surface');
+    expect(r.isPiscine).toBe(false);
+    expect(r.isolatedLight).toBe(false);
     expect(r.absorbed).toEqual([]);
   });
 });
