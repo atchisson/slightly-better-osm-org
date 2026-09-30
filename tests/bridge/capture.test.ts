@@ -664,6 +664,24 @@ describe('buildingsNear — bâtiments en multipolygone (I5)', () => {
     const bridge = makeBridge(ctx([contour, site]));
     expect(bridge.buildingsNear(partout)).toEqual([]);
   });
+
+  it('rend une voie fermée `area=yes` comme une surface', () => {
+    const pelouse = { type: 'way', id: 'w_s', tags: { area: 'yes' }, nodes: ['a', 'b', 'c', 'd', 'a'] };
+    const bridge = makeBridge(ctx([pelouse]));
+    expect(bridge.buildingsNear(partout).map(b => [b.id, b.kind])).toEqual([['w_s', 'surface']]);
+  });
+
+  it('rend le contour d’une relation piscine (et pas sa cour) comme une piscine', () => {
+    const piscine = {
+      type: 'relation', id: 'r3', tags: { type: 'multipolygon', leisure: 'swimming_pool' },
+      members: [
+        { type: 'way', id: 'w_outer', role: 'outer' },
+        { type: 'way', id: 'w_inner', role: 'inner' },
+      ],
+    };
+    const bridge = makeBridge(ctx([contour, cour, piscine]));
+    expect(bridge.buildingsNear(partout).map(b => [b.id, b.kind])).toEqual([['w_outer', 'piscine']]);
+  });
 });
 
 // Le chien de garde de src/main.ts : si captureContext() ne se résout jamais (iD a
@@ -1093,6 +1111,77 @@ describe('createBuilding — les entités d’iD sont des classes', () => {
       makeBridge(ctx).createBuilding(carre, { building: 'yes' }, [null, null, null, null]);
       expect(vues).toContain('osmNode');
       expect(vues).toContain('modeSelect');
+    } finally {
+      delete (globalThis as any).iD;
+    }
+  });
+
+  it('avec des trous, crée une relation multipolygone en une seule transaction', () => {
+    const ctx = ctxSimple();
+    let n = 0;
+    (globalThis as any).iD = {
+      osmNode: (p: any) => ({ id: `n${++n}`, ...p }),
+      osmWay: (p: any) => ({ id: `w${++n}`, ...p }),
+      osmRelation: (p: any) => ({ id: `r${++n}`, ...p }),
+      actionAddEntity: (e: unknown) => e,
+      modeSelect: (_c: unknown, ids: string[]) => ({ ids }),
+    };
+    const cour: [number, number][] = [[5.2, 5.2], [5.4, 5.2], [5.4, 5.4], [5.2, 5.4], [5.2, 5.2]];
+    try {
+      makeBridge(ctx).createBuilding(carre, { building: 'yes', source: 's' },
+        [null, null, null, null], [], [{ ring: cour, reused: [null, null, null, null] }]);
+
+      expect(ctx.perform).toHaveBeenCalledOnce();
+      const actions = (ctx.perform.mock.calls[0] as any[]).filter(a => a && typeof a === 'object');
+      const voies = actions.filter(a => a.nodes);
+      const relation = actions.find(a => a.members)!;
+      expect(voies).toHaveLength(2);
+      expect(voies.every(v => Object.keys(v.tags).length === 0)).toBe(true);
+      expect(relation.tags).toEqual({ type: 'multipolygon', building: 'yes', source: 's' });
+      expect(relation.members.map((m: any) => m.role)).toEqual(['outer', 'inner']);
+      expect((ctx.enter.mock.calls[0] as any[])[0].ids).toEqual([relation.id]);
+    } finally {
+      delete (globalThis as any).iD;
+    }
+  });
+
+  it('réutilise les nœuds existants d’un trou au lieu d’en créer', () => {
+    const ctx = ctxSimple();
+    let n = 0;
+    (globalThis as any).iD = {
+      osmNode: (p: any) => ({ id: `n${++n}`, ...p }),
+      osmWay: (p: any) => ({ id: `w${++n}`, ...p }),
+      osmRelation: (p: any) => ({ id: `r${++n}`, ...p }),
+      actionAddEntity: (e: unknown) => e,
+      modeSelect: () => ({}),
+    };
+    const cour: [number, number][] = [[5.2, 5.2], [5.4, 5.2], [5.4, 5.4], [5.2, 5.4], [5.2, 5.2]];
+    try {
+      makeBridge(ctx).createBuilding(carre, { building: 'yes' }, [null, null, null, null], [],
+        [{ ring: cour, reused: ['nA', 'nB', null, null] }]);
+      const actions = (ctx.perform.mock.calls[0] as any[]).filter(a => a && typeof a === 'object');
+      const noeuds = actions.filter(a => a.loc);
+      // 4 nœuds extérieurs + 2 nœuds de trou nouveaux (les deux autres sont réutilisés)
+      expect(noeuds).toHaveLength(6);
+      const trou = actions.filter(a => a.nodes)[1];
+      expect(trou.nodes.slice(0, 2)).toEqual(['nA', 'nB']);
+    } finally {
+      delete (globalThis as any).iD;
+    }
+  });
+
+  it('sans trou, garde une seule voie taguée et aucune relation', () => {
+    const ctx = ctxSimple();
+    (globalThis as any).iD = {
+      osmNode: (p: any) => ({ id: 'n', ...p }),
+      osmWay: (p: any) => ({ id: 'w', ...p }),
+      osmRelation: () => { throw new Error('pas de relation attendue'); },
+      actionAddEntity: (e: unknown) => e,
+      modeSelect: () => ({}),
+    };
+    try {
+      expect(() => makeBridge(ctx).createBuilding(carre, { building: 'yes' },
+        [null, null, null, null])).not.toThrow();
     } finally {
       delete (globalThis as any).iD;
     }

@@ -3,6 +3,13 @@ import type { ExistingNode, Insertion } from '../conflation/snap';
 import type { MergePlan, OsmWay } from '../merge';
 import type { LonLat, Ring } from '../geometry/types';
 
+/** Un anneau intérieur (cour) à créer, avec les nœuds OSM existants à y réutiliser. */
+export interface HoleSpec {
+  ring: Ring;
+  /** par sommet ouvert : l'id d'un nœud OSM à réutiliser, ou null */
+  reused: (string | null)[];
+}
+
 /**
  * Interface étroite entre le reste du projet et les internes d'iD. C'est le seul endroit
  * qui connaît le contexte iD ; tout le reste du projet ne dépend que de ce fichier.
@@ -38,6 +45,12 @@ export interface IdBridge {
     tags: Record<string, string>,
     reused: (string | null)[],
     insertions?: (Insertion | null)[],
+    /**
+     * Avec des trous, l'objet est une relation `type=multipolygon` portant `tags` ; les
+     * voies extérieure et intérieures n'en portent aucun (convention OSM). Une seule
+     * transaction, donc un seul Ctrl+Z.
+     */
+    holes?: HoleSpec[],
   ): void;
   /**
    * Préremplit le commentaire ET le champ source du panneau de sauvegarde d'iD.
