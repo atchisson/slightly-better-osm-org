@@ -44,7 +44,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
 describe('mode cadastre', () => {
   let container: HTMLElement;
   let bridge: IdBridge;
-  let created: { ring: unknown; tags: Record<string, string> }[];
+  let created: { ring: unknown; tags: Record<string, string>; holes?: unknown }[];
 
   beforeEach(() => {
     container = document.createElement('div');
@@ -57,7 +57,7 @@ describe('mode cadastre', () => {
       onMapMove: () => () => {},
       buildingsNear: () => [],
       nodesIn: () => [],
-      createBuilding: (ring, tags) => { created.push({ ring, tags }); },
+      createBuilding: (ring, tags, _r, _i, holes) => { created.push({ ring, tags, holes }); },
       prefillChangeset: vi.fn(),
       containerNode: () => container,
       whenSurfaceReady: () => Promise.resolve(true),
@@ -133,6 +133,68 @@ describe('mode cadastre', () => {
     await mode.whenReady();
     await mode.clickAt([0.0005, 0.0005]);
     expect(created[0]!.tags.wall).toBe('no');
+  });
+
+  const surface = (sym: string, ring: number[][]) => ({
+    properties: { SYM: sym }, geometry: { type: 'Polygon', coordinates: [ring] },
+  });
+
+  it('crée une surface générique avec area=yes et la source, sans autre tag', async () => {
+    const mode = createMode(bridge, {
+      loadDataset: async () => buildDataset('49007', '2026', [], [surface('34', carre(0, 0))]),
+      communeName: async () => 'Angers', notify: vi.fn(),
+    });
+    mode.enable();
+    await mode.whenReady();
+    await mode.clickAt([0.0005, 0.0005]);
+    expect(created).toHaveLength(1);
+    expect(Object.keys(created[0]!.tags).sort()).toEqual(['area', 'source']);
+  });
+
+  it('crée un bâtiment à cour avec son trou', async () => {
+    const mode = createMode(bridge, {
+      loadDataset: async () => buildDataset('49007', '2026', [
+        { ...feature('01', carre(0, 0, 0.01)),
+          geometry: { type: 'MultiPolygon', coordinates: [[carre(0, 0, 0.01), carre(0.004, 0.004, 0.002)]] } },
+      ]),
+      communeName: async () => 'Angers', notify: vi.fn(),
+    });
+    mode.enable();
+    await mode.whenReady();
+    await mode.clickAt([0.001, 0.001]);
+    expect(created).toHaveLength(1);
+    expect(created[0]!.holes).toHaveLength(1);
+    expect(created[0]!.tags['building']).toBe('yes');
+  });
+
+  it('un bâtiment OSM déjà dans la cour n’empêche pas la création', async () => {
+    bridge.buildingsNear = () => [{ id: 'w1', kind: 'batiment',
+      ring: carre(0.0045, 0.0045, 0.001) as any }];
+    const mode = createMode(bridge, {
+      loadDataset: async () => buildDataset('49007', '2026', [
+        { ...feature('01', carre(0, 0, 0.01)),
+          geometry: { type: 'MultiPolygon', coordinates: [[carre(0, 0, 0.01), carre(0.004, 0.004, 0.002)]] } },
+      ]),
+      communeName: async () => 'Angers', notify: vi.fn(),
+    });
+    mode.enable();
+    await mode.whenReady();
+    await mode.clickAt([0.001, 0.001]);
+    expect(created).toHaveLength(1);
+  });
+
+  it('le survol et le clic donnent le même verdict de doublon', async () => {
+    // Une piscine OSM voisine ne couvre pas une maison : ni le clic ni le survol ne
+    // doivent la traiter comme un doublon.
+    bridge.buildingsNear = () => [{ id: 'p', kind: 'piscine', ring: carre(0, 0) as any }];
+    const mode = createMode(bridge, {
+      loadDataset: async () => buildDataset('49007', '2026', [feature('01', carre(0, 0))]),
+      communeName: async () => 'Angers', notify: vi.fn(),
+    });
+    mode.enable();
+    await mode.whenReady();
+    mode.hoverAt([0.0005, 0.0005]);
+    expect(container.querySelector('path.sb-osm-preview')!.getAttribute('class')).toContain('sb-osm-ok');
   });
 
   it('désactivé, ne crée rien', async () => {

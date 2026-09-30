@@ -24,7 +24,7 @@ const NS = 'http://www.w3.org/2000/svg';
  * discipline d'isolation que le bridge (task 14) applique aux internes d'iD.
  */
 export interface Overlay {
-  show(ring: Ring, state: 'ok' | 'refus'): void;
+  show(ring: Ring, state: 'ok' | 'refus', holes?: Ring[]): void;
   hide(): void;
   /**
    * Marque ce que le curseur vise sur une voie, pour le mode d'amélioration de tracé.
@@ -87,6 +87,9 @@ export function createOverlay(bridge: IdBridge): Overlay {
   // de carte (draw), jamais mémorisé en coordonnées écran — sinon un pan ou un zoom
   // laisserait le contour affiché à l'ancienne position.
   let current: Ring | null = null;
+  // Cours (trous) de l'anneau montré : tracées dans le MÊME <path> que le contour, en
+  // remplissage evenodd, pour que le trou reste vide au lieu d'être recouvert.
+  let currentHoles: Ring[] = [];
   let cible: { loc: LonLat; kind: 'noeud' | 'segment'; partage: boolean } | null = null;
 
   const drawTarget = (): void => {
@@ -111,12 +114,12 @@ export function createOverlay(bridge: IdBridge): Overlay {
     // contour cadastral répète toujours son premier sommet, une route jamais.
     const a = current[0]!, z = current[current.length - 1]!;
     const ferme = current.length > 2 && a[0] === z[0] && a[1] === z[1];
-    const d = current
-      .map((p, i) => {
+    const trace = (ring: Ring, fermer: boolean): string =>
+      ring.map((p, i) => {
         const [x, y] = bridge.project(p);
         return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
-      })
-      .join(' ') + (ferme ? ' Z' : '');
+      }).join(' ') + (fermer ? ' Z' : '');
+    const d = [trace(current, ferme), ...currentHoles.map(h => trace(h, true))].join(' ');
     path.setAttribute('d', d);
     if (!ferme) path.setAttribute('fill', 'none');
   };
@@ -127,8 +130,10 @@ export function createOverlay(bridge: IdBridge): Overlay {
   const stopListening = bridge.onMapMove(draw);
 
   return {
-    show(ring, state) {
+    show(ring, state, holes) {
       current = ring;
+      currentHoles = holes ?? [];
+      path.setAttribute('fill-rule', 'evenodd');
       // Appliqué sans condition sur un changement d'état : un premier `show('ok')` de
       // session doit porter la classe `sb-osm-ok` au même titre qu'un `show('ok')`
       // qui suit un `show('refus')` — revue de la tâche 15, un garde sur l'état
@@ -138,7 +143,7 @@ export function createOverlay(bridge: IdBridge): Overlay {
       path.setAttribute('stroke', state === 'ok' ? '#2e7dd7' : '#c23b3b');
       draw();
     },
-    hide() { current = null; draw(); },
+    hide() { current = null; currentHoles = []; draw(); },
     showTarget(loc, kind, partage = false) { cible = { loc, kind, partage }; drawTarget(); },
     hideTarget() { cible = null; drawTarget(); },
     redraw: draw,

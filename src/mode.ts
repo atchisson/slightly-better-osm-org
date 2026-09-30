@@ -7,10 +7,10 @@ import { communeAt } from './cadastre/insee';
 import { overlapsExisting } from './conflation/overlap';
 import { snapToExistingNodes, planInsertions, DEFAULT_SNAP_TOLERANCE_M } from './conflation/snap';
 import { dilatedExtent } from './geometry/edges';
-import { buildingTags, poolTags, changesetComment, changesetSource } from './tagging/tags';
+import { buildingTags, poolTags, surfaceTags, changesetComment, changesetSource } from './tagging/tags';
 import { createOverlay, type Overlay } from './ui/overlay';
 import { refusalMessage } from './ui/messages';
-import type { IdBridge } from './bridge/types';
+import type { IdBridge, HoleSpec } from './bridge/types';
 import type { LonLat } from './geometry/types';
 
 export interface ModeDeps {
@@ -312,6 +312,17 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
     });
   };
 
+  /**
+   * Doublon éventuel d'une composition : un objet OSM de MÊME nature qui couvre déjà
+   * l'empreinte (cours exclues). Partagé par le survol et le clic pour qu'ils ne
+   * divergent jamais — le survol comparait auparavant à tous les objets.
+   */
+  const doublonDe = (r: Extract<Composition, { ok: true }>, extent: [LonLat, LonLat]) => {
+    const existants = bridge.buildingsNear(extent)
+      .filter(b => (b.kind ?? 'batiment') === r.nature);
+    return overlapsExisting(r.ring, existants, undefined, r.holes);
+  };
+
   return {
     isEnabled: () => enabled,
 
@@ -366,8 +377,8 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       // qui ne porte jamais de ring) empruntent le même chemin : rien à montrer de
       // vrai, donc on efface plutôt que de laisser un contour périmé à l'écran.
       if (!r || !r.ok) { overlay.hide(); return; }
-      const conflit = overlapsExisting(r.ring, bridge.buildingsNear(bridge.mapExtent()));
-      overlay.show(r.ring, conflit ? 'refus' : 'ok');
+      const conflit = doublonDe(r, bridge.mapExtent());
+      overlay.show(r.ring, conflit ? 'refus' : 'ok', r.holes);
     },
 
     hoverEnd() {
@@ -411,13 +422,10 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
         if (r.reason !== 'aucun-batiment') notify(refusalMessage(r.reason));
         return;
       }
-      // Un objet ne fait doublon qu'avec un objet de même nature. Sans ce filtre, une
-      // piscine serait déclarée déjà cartographiée à cause de la maison qui la borde,
-      // et une piscine déjà présente dans OSM passerait inaperçue.
-      const memeNature = (b: { kind?: string }): boolean =>
-        (b.kind === 'piscine') === r.isPiscine;
-      const existants = bridge.buildingsNear(bridge.mapExtent()).filter(memeNature);
-      if (overlapsExisting(r.ring, existants)) {
+      // Un objet ne fait doublon qu'avec un objet de même nature (voir doublonDe). Sans
+      // ce filtre, une piscine serait déclarée déjà cartographiée à cause de la maison
+      // qui la borde, et une piscine déjà présente dans OSM passerait inaperçue.
+      if (doublonDe(r, bridge.mapExtent())) {
         notify(refusalMessage('batiment-existant'));
         return;
       }
@@ -432,12 +440,20 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
         r.ring,
         bridge.nodesIn(dilatedExtent(r.ring, DEFAULT_SNAP_TOLERANCE_M)),
         DEFAULT_SNAP_TOLERANCE_M);
+      // Les cours se recousent aux nœuds existants (le bâtiment de la cour partage ses
+      // murs avec le trou) mais sans insertion dans un mur : on ne touche pas aux
+      // objets voisins pour une cour.
+      const trous: HoleSpec[] = r.holes.map(h => {
+        const s = snapToExistingNodes(h, bridge.nodesIn(dilatedExtent(h, DEFAULT_SNAP_TOLERANCE_M)),
+          DEFAULT_SNAP_TOLERANCE_M);
+        return { ring: s.ring, reused: s.reused };
+      });
       // Capturé AVANT la création : un rechargement de commune peut remplacer `dataset`
       // pendant l'attente du nom de commune, et l'attribution doit rester celle du jeu
       // de données qui a réellement produit cette géométrie.
       const millesime = dataset.millesime;
-      const tags = r.isPiscine
-        ? poolTags(millesime)
+      const tags = r.nature === 'piscine' ? poolTags(millesime)
+        : r.nature === 'surface' ? surfaceTags(millesime)
         : buildingTags({ isolatedLight: r.isolatedLight, millesime });
 
       // Un sommet qui n'a trouvé aucun nœud à réutiliser mais qui tombe sur le MUR
@@ -450,10 +466,10 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
         snapped.ring,
         snapped.reused,
         bridge.buildingsNear(dilatedExtent(snapped.ring, DEFAULT_SNAP_TOLERANCE_M))
-          .filter(memeNature),
+          .filter(b => (b.kind ?? 'batiment') === r.nature),
         DEFAULT_SNAP_TOLERANCE_M);
 
-      bridge.createBuilding(snapped.ring, tags, snapped.reused, insertions);
+      bridge.createBuilding(snapped.ring, tags, snapped.reused, insertions, trous);
       overlay?.hide();
 
       // Après la création seulement : le préremplissage du changeset est une obligation
