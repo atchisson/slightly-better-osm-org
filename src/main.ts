@@ -1,7 +1,8 @@
 import {
   captureContext, makeBridge, raceCaptureAgainstTimeout, CAPTURE_TIMEOUT_MS,
-  SURFACE_READY_TIMEOUT_MS, DISABLE_HINT, looksLikeIdDocument,
+  SURFACE_READY_TIMEOUT_MS, DISABLE_HINT, looksLikeIdDocument, makeNavigation,
 } from './bridge/capture';
+import { installerRecepteur, installerRelais } from './remote/receiver';
 import { createMode } from './mode';
 import { createCtrlShortcut } from './ui/shortcut';
 import { attachMergeMenu, fusionnerSelection } from './ui/merge-menu';
@@ -22,6 +23,12 @@ const log = (...a: unknown[]) => console.log('[sb-osm]', ...a);
 // deux ce point a été atteint est le premier réflexe de débogage.
 log('injecté —', location.pathname,
   window === window.top ? '(cadre principal)' : '(iframe)', '· build', BUILD);
+
+// Cadre principal (`/edit`) : fait suivre à l'iframe d'iD ce que la page MapRoulette
+// qui a ouvert cet onglet lui envoie. Installé tout de suite, avant la capture : il n'a
+// besoin d'aucun interne d'iD, et un message qui arriverait pendant le démarrage de
+// l'éditeur ne doit pas se perdre dans un cadre qui n'écoute pas encore.
+installerRelais();
 
 void (async () => {
   const capture = await raceCaptureAgainstTimeout(captureContext(), CAPTURE_TIMEOUT_MS);
@@ -81,6 +88,10 @@ void (async () => {
     );
     return;
   }
+
+  // Récepteur des ordres de la page MapRoulette (aller à, sélectionner, préremplir) :
+  // c'est lui qui, par son annonce « prêt », autorise la page à réutiliser cet onglet.
+  installerRecepteur(makeNavigation(capture.context, (c, s) => bridge.prefillChangeset(c, s)));
 
   const mode = createMode(bridge, { notify: m => window.alert(m) });
 

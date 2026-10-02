@@ -3,6 +3,7 @@ import type { ExistingBuilding } from '../conflation/overlap';
 import type { ExistingNode, Insertion } from '../conflation/snap';
 import type { MergePlan, OsmWay } from '../merge';
 import type { LonLat, Ring } from '../geometry/types';
+import type { Navigation } from '../remote/receiver';
 
 // `storage` ne figure PAS ici : il n'existe plus sur le contexte (spike du 2026-09-23).
 const PRIMITIVES = ['map', 'history', 'graph', 'projection', 'perform', 'enter', 'container'] as const;
@@ -301,6 +302,67 @@ export function makeBridge(ctx: unknown): IdBridge {
     }
   }
   return buildBridge(c);
+}
+
+/** Délai entre deux sondages du chargement d'un objet à sélectionner, et nombre maximal. */
+const SELECTION_SONDE_MS = 250;
+const SELECTION_ESSAIS_MAX = 32;
+
+/**
+ * Navigation commandée de l'extérieur : déplacer la carte, sélectionner des objets,
+ * préremplir le changeset.
+ *
+ * Passe par l'API du contexte d'iD — `map().centerZoom`, `zoomToEntities`,
+ * `modeSelect` — et non par le `#…` de l'URL : le hash est lu par iD à sa façon, change
+ * de forme sans préavis, et ne relit pas le commentaire de changeset quand il change.
+ * Les deux premières sont celles que le gestionnaire de hash d'iD appelle lui-même.
+ *
+ * Chaque appel est protégé séparément : une primitive qui disparaît dans une version
+ * future d'iD prive d'un effet (la sélection, par exemple), jamais des autres.
+ *
+ * Les objets à sélectionner ne sont pas forcément chargés : `zoomToEntities` demande
+ * leur chargement, puis on attend qu'ils soient dans le graphe — borné, pour qu'un objet
+ * supprimé ou inexistant ne laisse pas un sondage tourner indéfiniment.
+ */
+export function makeNavigation(
+  ctx: unknown,
+  prefill: (comment: string, source: string) => void,
+): Navigation {
+  const c = ctx as any;
+  return {
+    aller(cmd) {
+      if (cmd.carte) {
+        try {
+          c.map().centerZoom(cmd.carte.centre, cmd.carte.zoom);
+        } catch (err) {
+          console.warn('[sb-osm] centerZoom a échoué :', err);
+        }
+      }
+
+      if (cmd.ids) {
+        const ids = cmd.ids;
+        try { c.zoomToEntities?.(ids); } catch { /* le chargement n'est qu'un confort */ }
+        let essais = 0;
+        const sonde = setInterval(() => {
+          try {
+            const graphe = c.graph();
+            const chargees = ids.filter(id => graphe.hasEntity(id));
+            if (chargees.length < ids.length && ++essais <= SELECTION_ESSAIS_MAX) return;
+            clearInterval(sonde);
+            if (chargees.length > 0) {
+              const iD = (globalThis as any).iD;
+              c.enter(instancier(iD.modeSelect, c, chargees));
+            }
+          } catch (err) {
+            clearInterval(sonde);
+            console.warn('[sb-osm] sélection impossible :', err);
+          }
+        }, SELECTION_SONDE_MS);
+      }
+
+      if (cmd.comment !== undefined) prefill(cmd.comment, cmd.source ?? '');
+    },
+  };
 }
 
 /** Chevauchement de rectangles englobants : vrai dès que l'anneau touche l'étendue. */
