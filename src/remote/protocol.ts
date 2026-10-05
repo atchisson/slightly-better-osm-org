@@ -1,15 +1,15 @@
 import type { LonLat } from '../geometry/types';
 
 /**
- * Protocole entre la page MapRoulette et l'éditeur iD, par `postMessage`.
+ * Protocole des commandes de navigation entre onglets iD (voir `onglet.ts`).
  *
- * Pourquoi un message et non un changement de `#…` dans l'URL d'iD : le hash est un
+ * Pourquoi une commande et non un changement de `#…` dans l'URL d'iD : le hash est un
  * détail d'implémentation d'iD, qui peut changer sans préavis (`id=`, `map=`, les
- * paramètres reconnus au chargement mais pas au changement, comme `comment`). Un
- * message porte une intention — « va ici, sélectionne cela, préremplis ceci » — dont
- * seul le récepteur sait comment l'exécuter dans la version d'iD qu'il a sous la main.
+ * paramètres reconnus au chargement mais pas au changement, comme `comment`). Une
+ * commande porte une intention — « va ici, sélectionne cela, préremplis ceci » — dont
+ * seul l'onglet principal sait comment l'exécuter dans la version d'iD qu'il a sous la main.
  *
- * Tout ce qui arrive est une donnée non fiable : la page émettrice est un site tiers.
+ * Tout ce qui arrive est une donnée non fiable, même d'un autre onglet.
  * `lireCommande` ne rend qu'une commande reconstruite champ par champ, jamais l'objet
  * reçu.
  */
@@ -27,17 +27,7 @@ export interface Commande {
   source?: string;
 }
 
-export interface Pret { canal: typeof CANAL; type: 'pret' }
-
-export const pret = (): Pret => ({ canal: CANAL, type: 'pret' });
-
-/** Le récepteur est-il prêt ? Message de l'éditeur vers la page qui l'a ouvert. */
-export function estPret(data: unknown): boolean {
-  const d = data as { canal?: unknown; type?: unknown } | null;
-  return !!d && typeof d === 'object' && d.canal === CANAL && d.type === 'pret';
-}
-
-/** MapRoulette et ses sous-domaines : les seules pages autorisées à nous commander. */
+/** MapRoulette et ses sous-domaines : les seules pages dont un onglet peut transmettre une tâche. */
 export const origineMapRoulette = (origin: string): boolean =>
   /^https:\/\/([a-z0-9-]+\.)*maproulette\.org$/.test(origin);
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lireCommande, origineMapRoulette, estPret, pret, CANAL } from '../../src/remote/protocol';
+import { lireCommande, origineMapRoulette, CANAL } from '../../src/remote/protocol';
 
 const valide = {
   canal: CANAL, type: 'aller',
@@ -68,13 +68,5 @@ describe('origineMapRoulette', () => {
       'http://maproulette.org', 'https://maproulette.org.evil.com',
       'https://evilmaproulette.org', 'https://www.openstreetmap.org', 'null', '',
     ]) expect(origineMapRoulette(o)).toBe(false);
-  });
-});
-
-describe('estPret', () => {
-  it('reconnaît son propre message', () => {
-    expect(estPret(pret())).toBe(true);
-    expect(estPret({ canal: 'autre', type: 'pret' })).toBe(false);
-    expect(estPret(null)).toBe(false);
   });
 });

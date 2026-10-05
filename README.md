@@ -162,16 +162,20 @@ d'autre que lire et manipuler la page d'édition elle-même.
 
 ### Plusieurs tâches MapRoulette dans un seul changeset
 
-MapRoulette ferme l'onglet iD avant d'ouvrir la tâche suivante : les modifications ne
-suivent pas. Avec le script compagnon
-[maproulette-no-map-fallback](https://github.com/atchisson/maproulette-no-map-fallback)
-(version 1.3.1 ou suivante), **un seul onglet iD reste ouvert** : chaque tâche, même d'un
-autre défi, y déplace la carte, sélectionne son objet et ajoute son commentaire et sa
-source au changeset en cours. Fermez l'onglet quand vous avez fini.
+MapRoulette ouvre chaque tâche dans un NOUVEL onglet iD : les modifications de l'onglet
+précédent ne suivent pas. Ce greffon, installé seul, regroupe les onglets : le premier onglet
+iD ouvert depuis MapRoulette devient l'**onglet principal** ; pour chaque tâche suivante, le
+nouvel onglet **se ferme tout seul** et la tâche apparaît dans l'onglet principal (carte
+déplacée, objet sélectionné, commentaire et source ajoutés au changeset en cours). Aucun
+script compagnon n'est nécessaire. Basculez vous-même vers l'onglet principal : un onglet ne
+peut pas forcer le focus d'un autre. Fermez-le quand vous avez fini ; la tâche suivante en
+rouvrira un.
 
-- La page MapRoulette envoie un message à l'onglet iD, qui n'obéit qu'à la fenêtre qui
-  l'a ouvert, depuis `maproulette.org`, et revalide chaque champ. Rien ne passe par
-  l'URL d'iD, dont le format n'est pas garanti. Sans le script compagnon, rien ne change.
+- Le principal est désigné par un verrou du navigateur (Web Locks) ; les onglets se parlent
+  par un `BroadcastChannel`, jamais par l'URL d'iD, dont le format n'est pas garanti, ni par
+  `postMessage` depuis MapRoulette (openstreetmap.org coupe ce lien, voir le spike). Un onglet
+  ne se ferme que s'il vient de MapRoulette et que le principal a accusé réception : un onglet
+  iD ouvert à la main n'est jamais fermé, et si le principal ne répond pas, rien ne change.
 - Commentaire : hashtags dédoublonnés, textes joints par « ; ». Source : valeurs jointes
   par `;`. 255 caractères au plus. Sans modification en cours (rien d'édité, ou
   changeset déjà envoyé), la tâche remplace le commentaire : c'est un nouveau changeset.

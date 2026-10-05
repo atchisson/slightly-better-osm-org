@@ -3,7 +3,7 @@ import type { ExistingBuilding } from '../conflation/overlap';
 import type { ExistingNode, Insertion } from '../conflation/snap';
 import type { MergePlan, OsmWay } from '../merge';
 import type { LonLat, Ring } from '../geometry/types';
-import type { Navigation } from '../remote/receiver';
+import type { Navigation } from '../remote/onglet';
 import { fusionnerComment, fusionnerSource } from '../remote/changeset';
 
 // `storage` ne figure PAS ici : il n'existe plus sur le contexte (spike du 2026-09-23).

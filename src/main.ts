@@ -2,7 +2,7 @@ import {
   captureContext, makeBridge, raceCaptureAgainstTimeout, CAPTURE_TIMEOUT_MS,
   SURFACE_READY_TIMEOUT_MS, DISABLE_HINT, looksLikeIdDocument, makeNavigation,
 } from './bridge/capture';
-import { installerRecepteur, installerRelais } from './remote/receiver';
+import { installerOngletPrincipal } from './remote/onglet';
 import { createMode } from './mode';
 import { createCtrlShortcut } from './ui/shortcut';
 import { attachMergeMenu, fusionnerSelection } from './ui/merge-menu';
@@ -12,6 +12,16 @@ import { BUILD } from './meta';
 import type { LonLat } from './geometry/types';
 
 const log = (...a: unknown[]) => console.log('[sb-osm]', ...a);
+
+/** URL du cadre principal (`/edit`), repli sur le document courant si `top` est illisible. */
+function hrefDuCadrePrincipal(): string {
+  try { return window.top!.location.href; } catch { return window.location.href; }
+}
+
+/** Page d'où le cadre principal a été ouvert (MapRoulette), repli sur le document courant. */
+function referentDuCadrePrincipal(): string {
+  try { return window.top!.document.referrer; } catch { return document.referrer; }
+}
 
 // Tout premier acte du script, avant le moindre `await` — voir le spike du
 // 2026-09-23 (spike/probe.user.js), qui journalisait son injection en tout premier
@@ -23,12 +33,6 @@ const log = (...a: unknown[]) => console.log('[sb-osm]', ...a);
 // deux ce point a été atteint est le premier réflexe de débogage.
 log('injecté —', location.pathname,
   window === window.top ? '(cadre principal)' : '(iframe)', '· build', BUILD);
-
-// Cadre principal (`/edit`) : fait suivre à l'iframe d'iD ce que la page MapRoulette
-// qui a ouvert cet onglet lui envoie. Installé tout de suite, avant la capture : il n'a
-// besoin d'aucun interne d'iD, et un message qui arriverait pendant le démarrage de
-// l'éditeur ne doit pas se perdre dans un cadre qui n'écoute pas encore.
-installerRelais();
 
 void (async () => {
   const capture = await raceCaptureAgainstTimeout(captureContext(), CAPTURE_TIMEOUT_MS);
@@ -89,9 +93,20 @@ void (async () => {
     return;
   }
 
-  // Récepteur des ordres de la page MapRoulette (aller à, sélectionner, préremplir) :
-  // c'est lui qui, par son annonce « prêt », autorise la page à réutiliser cet onglet.
-  installerRecepteur(makeNavigation(capture.context, (c, s) => bridge.prefillChangeset(c, s)));
+  // Onglet principal : le premier onglet iD à prendre le verrou reçoit les tâches
+  // MapRoulette suivantes, qui s'ouvrent dans de nouveaux onglets puis se ferment (voir
+  // src/remote/onglet.ts). Installé une fois la navigation prête : l'onglet principal
+  // doit pouvoir exécuter ce qu'on lui transmet. Le cadre principal (`/edit`) et l'iframe
+  // `/id` sont de même origine : `window.top` est lisible, et c'est l'URL et le référent
+  // du cadre principal — ceux que MapRoulette a produits — qui comptent.
+  void installerOngletPrincipal({
+    nav: makeNavigation(capture.context, (c, s) => bridge.prefillChangeset(c, s)),
+    href: hrefDuCadrePrincipal(),
+    referrer: referentDuCadrePrincipal(),
+    fermer: () => {
+      try { window.top?.close(); } catch { /* fermeture refusée : l'onglet reste ouvert */ }
+    },
+  });
 
   const mode = createMode(bridge, { notify: m => window.alert(m) });
 
