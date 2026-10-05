@@ -160,6 +160,24 @@ d'autre que lire et manipuler la page d'édition elle-même.
   session réelle (voir `docs/verification-manuelle.md`) — sans rapport avec le tag
   `source` posé sur l'objet créé lui-même, indépendant et vérifié par les tests.
 
+### Plusieurs tâches MapRoulette dans un seul changeset
+
+MapRoulette ferme l'onglet iD avant d'ouvrir la tâche suivante : les modifications ne
+suivent pas. Avec le script compagnon
+[maproulette-no-map-fallback](https://github.com/atchisson/maproulette-no-map-fallback)
+(version 1.3.1 ou suivante), **un seul onglet iD reste ouvert** : chaque tâche, même d'un
+autre défi, y déplace la carte, sélectionne son objet et ajoute son commentaire et sa
+source au changeset en cours. Fermez l'onglet quand vous avez fini.
+
+- La page MapRoulette envoie un message à l'onglet iD, qui n'obéit qu'à la fenêtre qui
+  l'a ouvert, depuis `maproulette.org`, et revalide chaque champ. Rien ne passe par
+  l'URL d'iD, dont le format n'est pas garanti. Sans le script compagnon, rien ne change.
+- Commentaire : hashtags dédoublonnés, textes joints par « ; ». Source : valeurs jointes
+  par `;`. 255 caractères au plus. Sans modification en cours (rien d'édité, ou
+  changeset déjà envoyé), la tâche remplace le commentaire : c'est un nouveau changeset.
+- Il faut toujours marquer chaque tâche « corrigée » dans MapRoulette. Détails et limites :
+  `docs/superpowers/spikes/2026-10-02-telecommande-maproulette.md`.
+
 ## Attribution des données
 
 Les bâtiments proviennent des fichiers cadastre par commune publiés par Etalab/DINUM
