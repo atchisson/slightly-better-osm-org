@@ -8,6 +8,11 @@
 /** Limite de longueur d'un commentaire (et d'une source) de changeset côté OSM. */
 const MAX_OSM = 255;
 
+// iD et OSM comptent des POINTS DE CODE, pas des unités UTF-16 : un émoji vaut 1, et
+// `.length`/`.slice` le compteraient pour 2 puis pourraient couper sa paire de substitution.
+const longueur = (s: string): number => Array.from(s).length;
+const couper = (s: string, n: number): string => Array.from(s).slice(0, n).join('');
+
 const ELLIPSE = '…';
 
 /** Valeurs distinctes, dans l'ordre d'apparition ; `cle` définit l'égalité. */
@@ -59,31 +64,35 @@ function assembler(texte: string, hashtags: string[]): string {
 export function fusionnerComment(existant: string, nouveau: string, max = MAX_OSM): string {
   const a = decouper(existant);
   const b = decouper(nouveau);
-  const segments = dedoublonner([a.texte, b.texte].filter(t => t !== ''));
-  let hashtags = dedoublonner([...a.hashtags, ...b.hashtags], h => h.toLowerCase());
+  // Segments de texte à la granularité de « ; » : un texte déjà fusionné (« A; B ») est
+  // redécoupé, sinon fusionner à nouveau « B » le répéterait (« A; B; B ») et la fusion
+  // ne serait ni idempotente ni stable sur A, B, A.
+  const decoupeTexte = (t: string): string[] => t.split(/;s*/).map(x => x.trim()).filter(x => x !== '');
+  const segments = dedoublonner([...decoupeTexte(a.texte), ...decoupeTexte(b.texte)]);
+  const hashtags = dedoublonner([...a.hashtags, ...b.hashtags], h => h.toLowerCase());
 
-  if (hashtags.join(' ').length > max) {
+  if (longueur(hashtags.join(' ')) > max) {
     // Les hashtags seuls dépassent : il ne reste pas de place pour du texte.
     const gardes: string[] = [];
-    let longueur = 0;
+    let total = 0;
     for (const h of hashtags) {
-      const ajout = longueur === 0 ? h.length : h.length + 1;
-      if (longueur + ajout > max) continue;
+      const ajout = total === 0 ? longueur(h) : longueur(h) + 1;
+      if (total + ajout > max) continue;
       gardes.push(h);
-      longueur += ajout;
+      total += ajout;
     }
     return gardes.join(' ');
   }
 
-  while (segments.length > 1 && assembler(segments.join('; '), hashtags).length > max) segments.pop();
+  while (segments.length > 1 && longueur(assembler(segments.join('; '), hashtags)) > max) segments.pop();
 
   let texte = segments.join('; ');
-  if (assembler(texte, hashtags).length > max) {
+  if (longueur(assembler(texte, hashtags)) > max) {
     // Un seul segment, encore trop long : on le tronque dans la place laissée aux hashtags
     // (hashtags + 1 espace). S'il n'y a même pas de place pour une lettre et « … », on
     // l'abandonne plutôt que d'émettre une ellipse seule.
-    const place = max - (hashtags.length > 0 ? hashtags.join(' ').length + 1 : 0);
-    texte = place >= 2 ? texte.slice(0, place - 1).trimEnd() + ELLIPSE : '';
+    const place = max - (hashtags.length > 0 ? longueur(hashtags.join(' ')) + 1 : 0);
+    texte = place >= 2 ? couper(texte, place - 1).trimEnd() + ELLIPSE : '';
   }
   return assembler(texte, hashtags);
 }
@@ -98,6 +107,6 @@ export function fusionnerSource(existant: string, nouveau: string, max = MAX_OSM
   const valeurs = dedoublonner(
     [...existant.split(';'), ...nouveau.split(';')].map(v => v.trim()).filter(v => v !== ''),
   );
-  while (valeurs.length > 1 && valeurs.join(';').length > max) valeurs.pop();
-  return valeurs.join(';').slice(0, max);
+  while (valeurs.length > 1 && longueur(valeurs.join(';')) > max) valeurs.pop();
+  return couper(valeurs.join(';'), max);
 }

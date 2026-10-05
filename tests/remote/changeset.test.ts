@@ -44,20 +44,29 @@ describe('fusionnerComment', () => {
   it('ne dépasse jamais max : retire les textes depuis la fin, jamais le premier', () => {
     expect(fusionnerComment('aaaa #t', 'bbbb', 12)).toBe('aaaa #t');
     expect(fusionnerComment('aaaa #t', 'bbbb', 100)).toBe('aaaa; bbbb #t');
-    expect(fusionnerComment('aaaa', 'bbbb; cccc', 13)).toBe('aaaa');
-    const r = fusionnerComment('aaaa', 'bbbb', 5);
-    expect(r).toBe('aaaa');
+    expect(fusionnerComment('aaaa', 'bbbb; cccc', 13)).toBe('aaaa; bbbb');
+    expect(fusionnerComment('aaaa', 'bbbb; cccc', 9)).toBe('aaaa');
+    expect(fusionnerComment('aaaa', 'bbbb', 5)).toBe('aaaa');
   });
 
   it('tronque le seul texte restant avec « … », sans toucher aux hashtags', () => {
-    expect(fusionnerComment('abcdefghijklmnop #tag', '', 12)).toBe('abcdef… #tag');
+    const r = fusionnerComment('abcdefghijklmnop #tag', '', 12);
+    expect(r).toBe('abcdef… #tag');
+    expect(r.length).toBe(12); // exactement max : la place est entièrement utilisée
   });
 
-  it('respecte exactement max après troncature', () => {
-    const r = fusionnerComment('abcdefghijklmnop #tag', '', 12);
-    expect(r.length).toBeLessThanOrEqual(12);
-    expect(r.endsWith(' #tag')).toBe(true);
-    expect(r).toContain('…');
+  it('omet le texte plutôt que d’émettre une « … » seule quand il n’y a pas de place', () => {
+    // place = 6 - (4 + 1) = 1 < 2
+    expect(fusionnerComment('abcdefghij #tag', '', 6)).toBe('#tag');
+    expect(fusionnerComment('abcdefghij #tag', '', 5)).toBe('#tag');
+  });
+
+  it('compte et tronque en points de code : jamais de paire de substitution coupée', () => {
+    const r = fusionnerComment('ab😀😀😀😀😀', '', 5);
+    expect(Array.from(r).length).toBeLessThanOrEqual(5);
+    expect(r).toBe('ab😀😀…');
+    expect(r).not.toMatch(/[�-�](?![�-�])|(?<![�-�])[�-�]/);
+    expect(fusionnerComment('😀😀😀', '', 3)).toBe('😀😀😀'); // 3 points de code, 6 unités UTF-16
   });
 
   it('tronque un texte seul sans hashtag', () => {
@@ -67,6 +76,37 @@ describe('fusionnerComment', () => {
   it('si les hashtags seuls dépassent, ne garde que ceux qui tiennent entiers, dans l’ordre', () => {
     expect(fusionnerComment('texte #aaaa #bbbb', '#cccc', 11)).toBe('#aaaa #bbbb');
     expect(fusionnerComment('texte #aaaa #bbbb', '#cccc', 10)).toBe('#aaaa');
+  });
+
+  describe('segments de texte (idempotence)', () => {
+    it('ne répète pas un segment déjà présent dans un texte fusionné', () => {
+      expect(fusionnerComment('A; B', 'B')).toBe('A; B');
+      expect(fusionnerComment('A; B', 'A')).toBe('A; B');
+      expect(fusionnerComment('A', 'B; A')).toBe('A; B');
+    });
+
+    it('est idempotent : f(f(a,b),b) === f(a,b)', () => {
+      const cas: [string, string][] = [
+        ['Fix roads #maproulette #a', 'Fix names #maproulette #b'],
+        ['A; B #x', 'B #X #y'],
+        ['', 'x'], ['#a', '#A #b'], ['A', 'A'],
+      ];
+      for (const [a, b] of cas) {
+        const f = fusionnerComment(a, b);
+        expect(fusionnerComment(f, b)).toBe(f);
+        expect(fusionnerComment(f, a)).toBe(f);
+      }
+    });
+
+    it('A, B puis A ne redonne pas A', () => {
+      expect(fusionnerComment(fusionnerComment('A', 'B'), 'A')).toBe('A; B');
+    });
+
+    it('à la limite, retire les segments fins depuis la fin, jamais le 1er', () => {
+      expect(fusionnerComment('aaa; bbb; ccc #t', '', 12)).toBe('aaa; bbb #t');
+      expect(fusionnerComment('aaa; bbb; ccc #t', '', 7)).toBe('aaa #t');
+      expect(fusionnerComment('aaa; bbb', 'ccc', 12)).toBe('aaa; bbb');
+    });
   });
 
   it('un hashtag trop long à lui seul est abandonné, jamais coupé', () => {

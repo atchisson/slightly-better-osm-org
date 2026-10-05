@@ -33,10 +33,10 @@ comment l'exécuter.
 
 ## Résultat
 
-`2026-10-02-telecommande-e2e.cjs` (Playwright + Chrome) : 14 vérifications sur 14.
+`2026-10-02-telecommande-e2e.cjs` (Playwright + Chrome) : 16 vérifications sur 16.
 Avec les deux plugins : une seule fenêtre iD pour trois tâches, la modification faite dans
 la 1re est conservée, la carte va à la zone de chaque tâche, l'objet de la 3e est
-sélectionné, le commentaire du changeset est celui de la dernière tâche. Après fermeture
+sélectionné, le commentaire et la source du changeset sont fusionnés d'une tâche à l'autre tant qu'une modification est en cours (puis remplacés après l'envoi). Après fermeture
 manuelle de l'onglet, la tâche suivante en rouvre un. **Sans** le plugin iD, MapRoulette
 ferme et rouvre comme avant.
 
@@ -57,7 +57,7 @@ Quand des modifications sont en cours (`history().hasChanges()`), le commentaire
 d'une tâche s'ajoutent à ceux déjà préparés (réglages `comment` et `source` d'iD, lus comme
 `prefillChangeset` les écrit) au lieu de les remplacer : `src/remote/changeset.ts`. Hashtags
 dédoublonnés sans tenir compte de la casse et placés en fin, textes joints par « ; », sources
-jointes par « ; » (`;` côté OSM), 255 caractères au plus (textes retirés depuis la fin, un
+jointes par `;` sans espace (convention OSM), 255 caractères au plus (textes retirés depuis la fin, un
 hashtag n'est jamais coupé). Sans modification en cours (rien d'édité, ou changeset déjà envoyé),
 la tâche REMPLACE : c'est un nouveau changeset. `hasChanges` absent ou qui lève vaut « aucune ».
 Le commentaire de la 1re tâche n'étant que dans l'URL d'ouverture, le plugin MapRoulette le
