@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { installerOngletPrincipal } from '../../src/remote/onglet';
+import { installerOngletPrincipal, typeNavigationCourant } from '../../src/remote/onglet';
 import { CANAL } from '../../src/remote/protocol';
+import type { FenetreLisible as FenetreHaut } from '../../src/remote/onglet';
 
 const MR = 'https://maproulette.org/browse/challenges/1/task/2';
 const URL_TACHE =
@@ -140,14 +141,32 @@ describe('installerOngletPrincipal', () => {
 
   it('un accusé tardif, après le délai, ne ferme rien', async () => {
     const b = navigateur();
-    void b.locks.request('x', { ifAvailable: true }, () => new Promise(() => {}));
-    const c = onglet(b, { delai: 1000 });
-    await vi.advanceTimersByTimeAsync(1001);
-    expect(await c.resultat).toBe('ordinaire');
+    void b.locks.request('x', { ifAvailable: true }, () => new Promise(() => {}));   // principal muet
+    // on garde la main sur les écouteurs du canal du nouvel onglet : l'accusé lui sera livré
+    // directement, même si son canal est déjà fermé
+    const ecouteurs: Array<(e: { data: unknown }) => void> = [];
+    const creerCanal = () => {
+      const c = b.creerCanal();
+      return { ...c, addEventListener: (t: 'message', f: (e: { data: unknown }) => void) => { ecouteurs.push(f); c.addEventListener(t, f); } };
+    };
+    const n = { aller: vi.fn(), aDesModifications: () => false };
+    const fermer = vi.fn();
+    let resolu: string | null = null;
+    const r = installerOngletPrincipal({
+      nav: n, href: URL_TACHE, referrer: MR, typeNavigation: 'navigate', fermer, locks: b.locks,
+      creerCanal, delaiAccuseMs: 1000, aleatoire: () => 'abc',
+    });
+    void r.then(v => { resolu = v; });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(resolu).toBeNull();
+    await vi.advanceTimersByTimeAsync(2);
+    expect(resolu).toBe('ordinaire');   // le délai a été honoré, AVANT tout accusé
+    expect(ecouteurs).toHaveLength(1);
     // l'accusé arrive enfin : l'onglet a déjà renoncé, il reste ouvert
-    for (const m of b.membres) m.recus.forEach(f => f({ data: { canal: CANAL, type: 'recu', id: 'abc' } }));
+    expect(() => ecouteurs[0]!({ data: { canal: CANAL, type: 'recu', id: 'abc' } })).not.toThrow();
     await vi.advanceTimersByTimeAsync(10);
-    expect(c.fermer).not.toHaveBeenCalled();
+    expect(await r).toBe('ordinaire');
+    expect(fermer).not.toHaveBeenCalled();
   });
 
   it('ignore l’accusé d’une autre transmission', async () => {
@@ -346,5 +365,47 @@ describe('installerOngletPrincipal', () => {
     expect(b.locks.request).not.toHaveBeenCalled();
     expect(n.aller).not.toHaveBeenCalled();
     expect(fermer).not.toHaveBeenCalled();
+  });
+});
+
+describe('typeNavigationCourant', () => {
+  const perf = (type: string) => ({ getEntriesByType: () => [{ type }] });
+  const quiLeve = (): never => { throw new Error('cross-origin'); };
+
+  it('un cadre principal distinct et lisible fait foi, pas l’entrée de l’iframe', () => {
+    const haut = { performance: perf('reload') };
+    expect(typeNavigationCourant({ top: haut, performance: perf('navigate') })).toBe('reload');
+  });
+
+  it('top.performance qui lève : undefined, jamais l’entrée de l’iframe', () => {
+    const haut = { get performance(): never { return quiLeve(); } };
+    expect(typeNavigationCourant({ top: haut as FenetreHaut, performance: perf('navigate') })).toBeUndefined();
+  });
+
+  it('top.performance.getEntriesByType qui lève : undefined', () => {
+    const haut = { performance: { getEntriesByType: quiLeve } };
+    expect(typeNavigationCourant({ top: haut, performance: perf('navigate') })).toBeUndefined();
+  });
+
+  it('top illisible (accès qui lève) : undefined', () => {
+    const f = { get top(): never { return quiLeve(); }, performance: perf('navigate') };
+    expect(typeNavigationCourant(f as FenetreHaut)).toBeUndefined();
+  });
+
+  it('un cadre principal distinct sans entrée : undefined (pas frais)', () => {
+    expect(typeNavigationCourant({ top: { performance: { getEntriesByType: () => [] } }, performance: perf('navigate') })).toBeUndefined();
+    expect(typeNavigationCourant({ top: {}, performance: perf('navigate') })).toBeUndefined();
+  });
+
+  it('sans cadre principal distinct (top absent ou top === soi) : l’entrée du document', () => {
+    expect(typeNavigationCourant({ performance: perf('navigate') })).toBe('navigate');
+    expect(typeNavigationCourant({ top: null, performance: perf('reload') })).toBe('reload');
+    const soi: FenetreHaut = { performance: perf('back_forward') };
+    soi.top = soi;
+    expect(typeNavigationCourant(soi)).toBe('back_forward');
+  });
+
+  it('aucune API de performance : undefined', () => {
+    expect(typeNavigationCourant({})).toBeUndefined();
   });
 });

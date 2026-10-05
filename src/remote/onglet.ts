@@ -53,23 +53,27 @@ export interface Dependances {
 
 export type Role = 'principal' | 'transmis' | 'ordinaire';
 
+/** Ce qu'on lit d'une fenêtre : de quoi trouver `top` et l'entrée de navigation. */
+export interface FenetreLisible {
+  top?: FenetreLisible | null;
+  performance?: { getEntriesByType(t: string): unknown[] };
+}
+
 /**
  * Type de navigation du CADRE PRINCIPAL (celui dont on lit déjà l'URL et le référent) : l'iframe
  * `/id` a sa propre entrée, qui reste `navigate` quand c'est la page `/edit` qu'on recharge.
- * Repli sur le document courant si `top` est illisible.
+ *
+ * Qui échoue ÉCHOUE FERMÉ : si `top` existe et est distinct de nous mais illisible (erreur sur
+ * `top`, sur `performance` ou sur `getEntriesByType`), on rend `undefined` (= pas frais), jamais
+ * l'entrée de l'iframe, qui dirait `navigate` pour un onglet rechargé. L'entrée du document
+ * courant ne sert que s'il n'y a réellement pas de cadre principal distinct.
  */
-function typeNavigationCourant(): string | undefined {
-  const lire = (perf: Performance | undefined): string | undefined =>
-    (perf?.getEntriesByType('navigation')[0] as { type?: string } | undefined)?.type;
+export function typeNavigationCourant(fenetre: FenetreLisible = globalThis as FenetreLisible): string | undefined {
+  const lire = (f: FenetreLisible): string | undefined =>
+    (f.performance?.getEntriesByType('navigation')[0] as { type?: string } | undefined)?.type;
   try {
-    const haut = (globalThis as { top?: { performance?: Performance } }).top;
-    if (haut) {
-      const t = lire(haut.performance);
-      return t;   // lisible : c'est lui qui fait foi, même s'il ne dit rien (alors : pas frais)
-    }
-  } catch { /* top illisible : repli ci-dessous */ }
-  try {
-    return lire(globalThis.performance);
+    const haut = fenetre.top;
+    return lire(haut && haut !== fenetre ? haut : fenetre);
   } catch {
     return undefined;
   }
