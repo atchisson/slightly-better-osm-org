@@ -51,9 +51,20 @@ ferme et rouvre comme avant.
 - Les plugins sont injectés par `eval`, pas par un gestionnaire de scripts.
 - Les `@grant` du plugin MapRoulette (`unsafeWindow`) sont déjà ceux qu'il utilise.
 
+## Fusion du commentaire et de la source
+
+Quand des modifications sont en cours (`history().hasChanges()`), le commentaire et la source
+d'une tâche s'ajoutent à ceux déjà préparés (réglages `comment` et `source` d'iD, lus comme
+`prefillChangeset` les écrit) au lieu de les remplacer : `src/remote/changeset.ts`. Hashtags
+dédoublonnés sans tenir compte de la casse et placés en fin, textes joints par « ; », sources
+jointes par « ; » (`;` côté OSM), 255 caractères au plus (textes retirés depuis la fin, un
+hashtag n'est jamais coupé). Sans modification en cours (rien d'édité, ou changeset déjà envoyé),
+la tâche REMPLACE : c'est un nouveau changeset. `hasChanges` absent ou qui lève vaut « aucune ».
+Le commentaire de la 1re tâche n'étant que dans l'URL d'ouverture, le plugin MapRoulette le
+renvoie au message `pret` (commande réduite `comment`/`source`), ce qui remplit les réglages.
+
 ## Limites connues
 
-- Le commentaire et la source du changeset sont ceux de la dernière tâche, pas fusionnés.
 - Il faut toujours marquer les tâches « corrigées » une par une dans MapRoulette.
 - Une tâche qui échoue à sélectionner son objet (non chargé après ~8 s) laisse la carte
   sur la zone sans sélection.

@@ -4,6 +4,7 @@ import type { ExistingNode, Insertion } from '../conflation/snap';
 import type { MergePlan, OsmWay } from '../merge';
 import type { LonLat, Ring } from '../geometry/types';
 import type { Navigation } from '../remote/receiver';
+import { fusionnerComment, fusionnerSource } from '../remote/changeset';
 
 // `storage` ne figure PAS ici : il n'existe plus sur le contexte (spike du 2026-09-23).
 const PRIMITIVES = ['map', 'history', 'graph', 'projection', 'perform', 'enter', 'container'] as const;
@@ -360,9 +361,51 @@ export function makeNavigation(
         }, SELECTION_SONDE_MS);
       }
 
-      if (cmd.comment !== undefined) prefill(cmd.comment, cmd.source ?? '');
+      if (cmd.comment !== undefined) {
+        // Plusieurs tâches dans UN changeset : si des modifications sont en cours, le
+        // commentaire et la source de cette tâche s'AJOUTENT à ceux déjà préparés. Sinon
+        // (rien d'édité, ou changeset déjà envoyé, historique remis à zéro) c'est un
+        // nouveau changeset : on REMPLACE, comme avant. Sans cette distinction, les
+        // hashtags du changeset précédent colleraient au suivant.
+        const aChangements = ontDesChangements(c);
+        const lu = aChangements ? lireReglagesChangeset() : { comment: '', source: '' };
+        const comment = aChangements ? fusionnerComment(lu.comment, cmd.comment) : cmd.comment;
+        const source = aChangements ? fusionnerSource(lu.source, cmd.source ?? '') : (cmd.source ?? '');
+        prefill(comment, source);
+      }
     },
   };
+}
+
+/**
+ * Des modifications sont-elles en cours dans l'éditeur ? `history().hasChanges()` n'est
+ * pas une primitive vérifiée par le spike : absente ou qui lève, on répond « non » — le
+ * repli est alors le remplacement, le comportement d'avant la fusion, jamais une perte.
+ */
+function ontDesChangements(c: any): boolean {
+  try {
+    return c.history().hasChanges() === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Lit les réglages `comment` et `source` d'iD, par le même chemin que celui par lequel
+ * `prefillChangeset` les écrit (`iD.prefs` si c'est une fonction, sinon localStorage),
+ * pour que « ce qui est déjà préparé » soit exactement ce qu'iD affichera. Illisible : ''.
+ */
+function lireReglagesChangeset(): { comment: string; source: string } {
+  const iD = (globalThis as any).iD;
+  const lire = (k: string): string => {
+    try {
+      const v = iD && typeof iD.prefs === 'function' ? iD.prefs(k) : localStorage.getItem(k);
+      return typeof v === 'string' ? v : '';
+    } catch {
+      return '';
+    }
+  };
+  return { comment: lire('comment'), source: lire('source') };
 }
 
 /** Chevauchement de rectangles englobants : vrai dès que l'anneau touche l'étendue. */

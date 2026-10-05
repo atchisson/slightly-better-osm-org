@@ -86,4 +86,93 @@ describe('makeNavigation', () => {
     vi.advanceTimersByTime(250);
     expect(ctx.enter).toHaveBeenCalledOnce();
   });
+
+  describe('fusion du changeset', () => {
+    // Réglages d'iD factices : `iD.prefs(k)` lit, `iD.prefs(k, v)` écrit.
+    const reglages = (init: Record<string, string>) => {
+      const iD: any = (globalThis as any).iD;
+      iD.prefs = (k: string) => init[k];
+    };
+    const avecHistorique = (history: unknown) => ({ ...contexte(), history } as any);
+    const existants = { comment: '#maproulette #defi-un', source: 'defi un' };
+    const nouvelle = cmd({ comment: '#maproulette #defi-deux', source: 'defi deux' });
+
+    it('fusionne quand des modifications sont en cours', () => {
+      reglages(existants);
+      const prefill = vi.fn();
+      makeNavigation(avecHistorique(() => ({ hasChanges: () => true })), prefill).aller(nouvelle);
+      expect(prefill).toHaveBeenCalledWith('#maproulette #defi-un #defi-deux', 'defi un;defi deux');
+    });
+
+    it('conserve la source existante quand la commande n’en a pas (fusion)', () => {
+      reglages({ comment: 'a', source: 'x;y' });
+      const prefill = vi.fn();
+      makeNavigation(avecHistorique(() => ({ hasChanges: () => true })), prefill)
+        .aller(cmd({ comment: 'b' }));
+      expect(prefill).toHaveBeenCalledWith('a; b', 'x;y');
+    });
+
+    it('remplace quand rien n’est en cours d’édition', () => {
+      reglages(existants);
+      const prefill = vi.fn();
+      makeNavigation(avecHistorique(() => ({ hasChanges: () => false })), prefill).aller(nouvelle);
+      expect(prefill).toHaveBeenCalledWith('#maproulette #defi-deux', 'defi deux');
+    });
+
+    it('remplace (source vide si absente) quand rien n’est en cours', () => {
+      reglages(existants);
+      const prefill = vi.fn();
+      makeNavigation(avecHistorique(() => ({ hasChanges: () => false })), prefill)
+        .aller(cmd({ comment: 'seul' }));
+      expect(prefill).toHaveBeenCalledWith('seul', '');
+    });
+
+    it('remplace quand hasChanges est absent', () => {
+      reglages(existants);
+      const prefill = vi.fn();
+      makeNavigation(avecHistorique(() => ({})), prefill).aller(nouvelle);
+      expect(prefill).toHaveBeenCalledWith('#maproulette #defi-deux', 'defi deux');
+    });
+
+    it('remplace quand history() est absent', () => {
+      reglages(existants);
+      const prefill = vi.fn();
+      makeNavigation(contexte(), prefill).aller(nouvelle);
+      expect(prefill).toHaveBeenCalledWith('#maproulette #defi-deux', 'defi deux');
+    });
+
+    it('remplace quand hasChanges lève', () => {
+      reglages(existants);
+      const prefill = vi.fn();
+      const ctx = avecHistorique(() => ({ hasChanges: () => { throw new Error('x'); } }));
+      makeNavigation(ctx, prefill).aller(nouvelle);
+      expect(prefill).toHaveBeenCalledWith('#maproulette #defi-deux', 'defi deux');
+    });
+
+    it('lit les réglages existants dans localStorage si iD.prefs n’est pas une fonction', () => {
+      const magasin: Record<string, string> = { ...existants };
+      vi.stubGlobal('localStorage', { getItem: (k: string) => magasin[k] ?? null });
+      try {
+        const prefill = vi.fn();
+        makeNavigation(avecHistorique(() => ({ hasChanges: () => true })), prefill).aller(nouvelle);
+        expect(prefill).toHaveBeenCalledWith('#maproulette #defi-un #defi-deux', 'defi un;defi deux');
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('traite des réglages illisibles comme vides (fusion avec du vide)', () => {
+      (globalThis as any).iD.prefs = () => { throw new Error('illisible'); };
+      const prefill = vi.fn();
+      makeNavigation(avecHistorique(() => ({ hasChanges: () => true })), prefill).aller(nouvelle);
+      expect(prefill).toHaveBeenCalledWith('#maproulette #defi-deux', 'defi deux');
+    });
+
+    it('n’appelle pas prefill sans commentaire', () => {
+      reglages(existants);
+      const prefill = vi.fn();
+      makeNavigation(avecHistorique(() => ({ hasChanges: () => true })), prefill).aller(cmd({}));
+      expect(prefill).not.toHaveBeenCalled();
+    });
+  });
 });

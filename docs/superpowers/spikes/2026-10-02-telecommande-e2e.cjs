@@ -121,8 +121,13 @@ const idFrame = async popup => {
     check('A6 la carte est allée sur la 2e zone (Angers)', Math.abs(centre2[1] - 47.4784) < 0.01 && Math.abs(centre2[0] + 0.5632) < 0.01, JSON.stringify(centre2));
     const nbApres = await frame1.evaluate(() => window.__ctx.history().difference().summary().length);
     check('A7 la modification de la 1re tâche est conservée', nbApres === 1, 'summary=' + nbApres);
+    // Une modification est en cours : le commentaire et la source de la 2e tâche sont FUSIONNÉS
+    // avec ceux de la 1re (qui n'étaient que dans l'URL d'ouverture : le plugin MapRoulette les
+    // renvoie au message « pret »).
     const comment = await frame1.evaluate(() => localStorage.getItem('comment'));
-    check('A8 le commentaire de changeset est celui de la 2e tâche', comment === '#maproulette #defi-deux', JSON.stringify(comment));
+    const source = await frame1.evaluate(() => localStorage.getItem('source'));
+    check('A8 le commentaire de changeset fusionne les tâches 1 et 2',
+      comment === '#maproulette #defi-un #defi-deux' && source === 'defi un;defi deux', JSON.stringify([comment, source]));
 
     // 3e tâche : avec un objet à sélectionner
     await mr.click('#t3');
@@ -133,9 +138,22 @@ const idFrame = async popup => {
       await sleep(500);
     }
     check('A9 l’objet de la 3e tâche est sélectionné', sel.includes('w' + way), JSON.stringify(sel));
+    const comment3 = await frame1.evaluate(() => localStorage.getItem('comment'));
+    const source3 = await frame1.evaluate(() => localStorage.getItem('source'));
+    check('A13 la 3e tâche s’ajoute à la fusion',
+      comment3 === '#maproulette #defi-un #defi-deux #defi-trois' && source3 === 'defi un;defi deux;defi trois', JSON.stringify([comment3, source3]));
     check('A10 toujours un seul onglet iD', context.pages().length === pagesAvant);
     const nbFin = await frame1.evaluate(() => window.__ctx.history().difference().summary().length);
     check('A11 la modification est toujours là après 3 tâches', nbFin === 1);
+
+    // Envoi simulé (historique vidé) : la tâche suivante démarre un nouveau changeset et REMPLACE.
+    await frame1.evaluate(() => window.__ctx.history().reset());
+    await mr.click('#t2');
+    await sleep(2000);
+    const comment4 = await frame1.evaluate(() => localStorage.getItem('comment'));
+    const source4 = await frame1.evaluate(() => localStorage.getItem('source'));
+    check('A14 après l’envoi, la tâche suivante remplace le commentaire et la source',
+      comment4 === '#maproulette #defi-deux' && source4 === 'defi deux', JSON.stringify([comment4, source4]));
 
     // L'utilisateur ferme l'onglet iD : la tâche suivante doit en ouvrir un nouveau.
     await popup1.close();
