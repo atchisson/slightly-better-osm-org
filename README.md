@@ -176,6 +176,13 @@ rouvrira un.
   `postMessage` depuis MapRoulette (openstreetmap.org coupe ce lien, voir le spike). Un onglet
   ne se ferme que s'il vient de MapRoulette et que le principal a accusé réception : un onglet
   iD ouvert à la main n'est jamais fermé, et si le principal ne répond pas, rien ne change.
+- Le principal est le PREMIER onglet iD à tenir le verrou, y compris un onglet ouvert à la
+  main : s'il porte des modifications sans rapport, les tâches MapRoulette y fusionnent leur
+  commentaire et leur source (voulu). L'accusé signifie « commande reçue et confiée à la
+  navigation », pas « appliquée » : si la navigation du principal échoue, le nouvel onglet s'est
+  quand même fermé et la tâche est à rouvrir. Un onglet rechargé ou restauré ne transmet jamais,
+  et un onglet qui porte des modifications ne se ferme jamais. Si une connexion à osm.org fait
+  perdre le référent MapRoulette, l'ancien comportement demeure (un onglet par tâche).
 - Commentaire : hashtags dédoublonnés, textes joints par « ; ». Source : valeurs jointes
   par `;`. 255 caractères au plus. Sans modification en cours (rien d'édité, ou
   changeset déjà envoyé), la tâche remplace le commentaire : c'est un nouveau changeset.

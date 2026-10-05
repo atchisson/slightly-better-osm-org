@@ -45,6 +45,19 @@ MapRoulette est inchangé (un nouvel onglet par tâche, l'objet en paramètre de
   ferme rien et reste un onglet iD ordinaire : le comportement d'origine.
 - Un onglet iD ouvert à la main (sans référent MapRoulette) n'est jamais fermé et ne transmet
   rien. Sans Web Locks ni `BroadcastChannel`, le greffon ne fait rien de tout cela.
+- Le principal est le PREMIER onglet iD à tenir le verrou, y compris un onglet ouvert à la main :
+  s'il porte des modifications sans rapport, les tâches MapRoulette y fusionnent leur commentaire
+  et leur source (acceptable, par conception).
+- L'accusé veut dire « commande reçue et confiée à la navigation », pas « appliquée » : si la
+  navigation du principal échoue, le nouvel onglet s'est quand même fermé, la tâche est à rouvrir.
+- **Garde-fous** : `document.referrer` survit à F5, à la restauration de session et à « rouvrir
+  l'onglet fermé ». Seul un chargement de type `navigate` (lu sur le cadre PRINCIPAL : l'iframe
+  `/id` reste `navigate` quand on recharge `/edit`, constaté par le banc) peut donc transmettre
+  ou appliquer la commande réduite, et un onglet qui porte des modifications
+  (`Navigation.aDesModifications`, `history().hasChanges()`) ne se ferme jamais, ni avant d'envoyer
+  ni après l'accusé. Un onglet rechargé ou restauré ne transmet jamais.
+- Une connexion qui passe par osm.org fait perdre le référent MapRoulette : on retrouve alors
+  l'ancien comportement (un nouvel onglet par tâche).
 - Le plugin MapRoulette (`maproulette-no-fallback`, réutilisation de fenêtre) est devenu
   inutile et a été retiré ; ce greffon-ci n'a plus besoin d'aucun script compagnon.
 
@@ -71,7 +84,7 @@ l'exécuter dans la version d'iD qu'il a sous la main.
 ## Résultat
 
 `2026-10-02-telecommande-e2e.cjs` (Playwright + Chrome sans interface, COOP posé sur toutes les
-réponses d'openstreetmap.org) : 25 vérifications sur 25.
+réponses d'openstreetmap.org) : 30 vérifications sur 30.
 
 - A : la 1re tâche ouvre l'onglet principal ; la 2e ouvre un onglet qui se ferme seul (au plus
   6 s) ; l'onglet principal reste ouvert, sa carte va sur la zone de la 2e tâche, la modification
@@ -80,6 +93,9 @@ réponses d'openstreetmap.org) : 25 vérifications sur 25.
 - B : l'utilisateur ferme le principal : la tâche suivante ouvre un onglet qui devient
   principal et reste ouvert.
 - C : un onglet iD ouvert à la main alors qu'un principal existe reste ouvert et ne transmet rien.
+- E : un onglet resté « ordinaire » (principal rendu muet) puis rechargé, alors que le principal
+  répond, ne transmet rien et reste ouvert. Le garde « modifications en cours » n'est couvert que
+  par les tests unitaires (le provoquer avant la décision serait une course).
 - D : sans Web Locks, comportement d'origine, aucun onglet fermé.
 
 ## Ce que ce test ne prouve pas

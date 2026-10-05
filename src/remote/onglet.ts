@@ -8,6 +8,8 @@ import { commandeDepuisUrl } from './url';
  */
 export interface Navigation {
   aller(cmd: Commande): void;
+  /** Des modifications non envoyées sont-elles en cours ? Absent ou qui lève : non. */
+  aDesModifications(): boolean;
 }
 
 /** Nom du verrou Web Locks qui désigne l'onglet principal, et du canal entre onglets. */
@@ -38,12 +40,40 @@ export interface Dependances {
   creerCanal?: (nom: string) => Canal;
   /** Ferme l'onglet courant. Peut lever : l'appelant n'en dépend pas. */
   fermer: () => void;
+  /**
+   * Type de navigation du chargement du document (`'navigate'`, `'reload'`, `'back_forward'`…).
+   * Par défaut lu dans `performance.getEntriesByType('navigation')`. Seul `'navigate'` est
+   * une ouverture neuve depuis un lien ; tout le reste (ou une API absente) n'en est pas une.
+   */
+  typeNavigation?: string;
   /** Attente maximale de l'accusé de l'onglet principal. */
   delaiAccuseMs?: number;
   aleatoire?: () => string;
 }
 
 export type Role = 'principal' | 'transmis' | 'ordinaire';
+
+/**
+ * Type de navigation du CADRE PRINCIPAL (celui dont on lit déjà l'URL et le référent) : l'iframe
+ * `/id` a sa propre entrée, qui reste `navigate` quand c'est la page `/edit` qu'on recharge.
+ * Repli sur le document courant si `top` est illisible.
+ */
+function typeNavigationCourant(): string | undefined {
+  const lire = (perf: Performance | undefined): string | undefined =>
+    (perf?.getEntriesByType('navigation')[0] as { type?: string } | undefined)?.type;
+  try {
+    const haut = (globalThis as { top?: { performance?: Performance } }).top;
+    if (haut) {
+      const t = lire(haut.performance);
+      return t;   // lisible : c'est lui qui fait foi, même s'il ne dit rien (alors : pas frais)
+    }
+  } catch { /* top illisible : repli ci-dessous */ }
+  try {
+    return lire(globalThis.performance);
+  } catch {
+    return undefined;
+  }
+}
 
 const log = (...a: unknown[]) => console.info('[sb-osm]', ...a);
 
@@ -62,6 +92,10 @@ const log = (...a: unknown[]) => console.info('[sb-osm]', ...a);
  *   puis se ferme : seul un onglet ouvert par un lien peut se fermer lui-même, et c'est
  *   le cas de celui-là ;
  * - tout autre onglet (ouvert à la main) reste ordinaire et ne se ferme jamais.
+ *
+ * Deux garde-fous, parce que `document.referrer` survit à F5, à la restauration de session et
+ * à « rouvrir l'onglet fermé » : seul un chargement `navigate` (ouverture neuve depuis un lien)
+ * peut transmettre, et un onglet qui porte des modifications ne se ferme JAMAIS.
  *
  * Sans accusé (principal gelé, disparu entre-temps), rien n'est fermé : l'onglet reste
  * un onglet iD ordinaire, le comportement d'origine. Sans Web Locks ni BroadcastChannel,
@@ -84,9 +118,15 @@ export async function installerOngletPrincipal(deps: Dependances): Promise<Role>
     });
   });
 
-  const vientDeMapRoulette = (() => {
+  // « Vient de MapRoulette » ne vaut que pour une ouverture neuve : un onglet rechargé ou
+  // restauré garde son référent et son URL périmés, il ne doit ni transmettre ni se fermer.
+  const neuf = (deps.typeNavigation ?? typeNavigationCourant()) === 'navigate';
+  const vientDeMapRoulette = neuf && (() => {
     try { return origineMapRoulette(new URL(deps.referrer).origin); } catch { return false; }
   })();
+  const aDesModifs = (): boolean => {
+    try { return deps.nav.aDesModifications(); } catch { return true; }   // doute : on ne ferme rien
+  };
 
   if (principal) {
     const canal = creerCanal(NOM_CANAL);
@@ -126,6 +166,12 @@ export async function installerOngletPrincipal(deps: Dependances): Promise<Role>
     return 'ordinaire';
   }
 
+  // Un onglet qui porte des modifications est un onglet de travail : il ne s'efface pas.
+  if (aDesModifs()) {
+    log('onglet ordinaire');
+    return 'ordinaire';
+  }
+
   const id = (deps.aleatoire ?? (() => Math.random().toString(36).slice(2)))();
   const canal = creerCanal(NOM_CANAL);
   const accuse = await new Promise<boolean>(resolve => {
@@ -147,6 +193,7 @@ export async function installerOngletPrincipal(deps: Dependances): Promise<Role>
     return 'ordinaire';
   }
   log("commande transmise à l'onglet principal");
+  if (aDesModifs()) return 'ordinaire';   // des modifications sont apparues pendant l'attente
   try {
     deps.fermer();
   } catch { /* fermeture refusée : l'onglet reste ouvert, la tâche est déjà transmise */ }

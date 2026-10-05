@@ -40,7 +40,10 @@ export function commandeDepuisUrl(href: string): Commande | null {
   ajouter('r', url.searchParams.get('relation'));
   // `id=` du hash est déjà préfixé ; `lireCommande` écarte ce qui n'a pas la bonne forme.
   for (const v of (hash.get('id') ?? '').split(',')) if (v) ids.push(v);
-  if (ids.length > 0) brut.ids = ids;
+  // Le même objet peut figurer dans la requête (`way=456`) et dans le hash (`id=w456`, la
+  // réécriture de /edit) : une seule fois.
+  const uniques = [...new Set(ids)];
+  if (uniques.length > 0) brut.ids = uniques;
 
   const comment = hash.get('comment');
   if (comment !== null) brut.comment = comment;

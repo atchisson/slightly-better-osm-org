@@ -331,6 +331,7 @@ export function makeNavigation(
 ): Navigation {
   const c = ctx as any;
   return {
+    aDesModifications: () => ontDesChangements(c),
     aller(cmd) {
       if (cmd.carte) {
         try {

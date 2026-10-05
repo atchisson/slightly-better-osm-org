@@ -175,4 +175,17 @@ describe('makeNavigation', () => {
       expect(prefill).not.toHaveBeenCalled();
     });
   });
+
+  describe('aDesModifications', () => {
+    const avec = (history: () => unknown) => ({ ...contexte(), history }) as any;
+    it('reflète history().hasChanges()', () => {
+      expect(makeNavigation(avec(() => ({ hasChanges: () => true })), vi.fn()).aDesModifications()).toBe(true);
+      expect(makeNavigation(avec(() => ({ hasChanges: () => false })), vi.fn()).aDesModifications()).toBe(false);
+    });
+    it('absent ou qui lève : false', () => {
+      expect(makeNavigation(contexte(), vi.fn()).aDesModifications()).toBe(false);
+      expect(makeNavigation(avec(() => { throw new Error('x'); }), vi.fn()).aDesModifications()).toBe(false);
+      expect(makeNavigation(avec(() => ({ hasChanges: () => 'oui' })), vi.fn()).aDesModifications()).toBe(false);
+    });
+  });
 });

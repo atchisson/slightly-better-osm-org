@@ -38,12 +38,12 @@ function navigateur() {
   return { locks, creerCanal, diffuses, membres };
 }
 
-function onglet(nav: ReturnType<typeof navigateur>, { href = URL_TACHE, referrer = MR, delai = 3000 } = {}) {
-  const n = { aller: vi.fn() };
+function onglet(nav: ReturnType<typeof navigateur>, { href = URL_TACHE, referrer = MR, delai = 3000, type = 'navigate', modifs = false } = {}) {
+  const n = { aller: vi.fn(), aDesModifications: vi.fn(() => modifs) };
   const fermer = vi.fn();
   const resultat = installerOngletPrincipal({
     nav: n, href, referrer, fermer, locks: nav.locks, creerCanal: nav.creerCanal,
-    delaiAccuseMs: delai, aleatoire: () => 'abc',
+    typeNavigation: type, delaiAccuseMs: delai, aleatoire: () => 'abc',
   });
   return { n, fermer, resultat };
 }
@@ -144,6 +144,9 @@ describe('installerOngletPrincipal', () => {
     const c = onglet(b, { delai: 1000 });
     await vi.advanceTimersByTimeAsync(1001);
     expect(await c.resultat).toBe('ordinaire');
+    // l'accusé arrive enfin : l'onglet a déjà renoncé, il reste ouvert
+    for (const m of b.membres) m.recus.forEach(f => f({ data: { canal: CANAL, type: 'recu', id: 'abc' } }));
+    await vi.advanceTimersByTimeAsync(10);
     expect(c.fermer).not.toHaveBeenCalled();
   });
 
@@ -219,9 +222,9 @@ describe('installerOngletPrincipal', () => {
   it('une navigation qui lève pour la commande réduite n’empêche pas d’être principal', async () => {
     const b = navigateur();
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const n = { aller: vi.fn(() => { throw new Error('boum'); }) };
+    const n = { aller: vi.fn(() => { throw new Error('boum'); }), aDesModifications: () => false };
     const r = await installerOngletPrincipal({
-      nav: n, href: URL_TACHE, referrer: MR, fermer: vi.fn(), locks: b.locks, creerCanal: b.creerCanal,
+      nav: n, href: URL_TACHE, referrer: MR, typeNavigation: 'navigate', fermer: vi.fn(), locks: b.locks, creerCanal: b.creerCanal,
     });
     expect(r).toBe('principal');
   });
@@ -230,18 +233,105 @@ describe('installerOngletPrincipal', () => {
     const b = navigateur();
     await onglet(b).resultat;
     const c = installerOngletPrincipal({
-      nav: { aller: vi.fn() }, href: URL_TACHE, referrer: MR, locks: b.locks, creerCanal: b.creerCanal,
+      nav: { aller: vi.fn(), aDesModifications: () => false }, href: URL_TACHE, referrer: MR, typeNavigation: 'navigate', locks: b.locks, creerCanal: b.creerCanal,
       fermer: () => { throw new Error('refusé'); },
     });
     expect(await c).toBe('transmis');
   });
 
+  describe('garde-fous : ne jamais fermer un onglet rechargé ou qui porte des modifications', () => {
+    for (const type of ['reload', 'back_forward', 'prerender', 'inconnu', undefined as unknown as string]) {
+      it(`un chargement « ${type} » ne transmet rien et ne ferme rien`, async () => {
+        const b = navigateur();
+        await onglet(b).resultat;
+        b.diffuses.length = 0;
+        const c = onglet(b, { type: type ?? '' });
+        expect(await c.resultat).toBe('ordinaire');
+        await vi.advanceTimersByTimeAsync(10000);
+        expect(b.diffuses).toEqual([]);
+        expect(c.fermer).not.toHaveBeenCalled();
+        expect(console.info).toHaveBeenCalledWith('[sb-osm]', 'onglet ordinaire');
+      });
+    }
+
+    it('sans API de navigation (type illisible), l’onglet n’est pas frais', async () => {
+      const b = navigateur();
+      await onglet(b).resultat;
+      const fermer = vi.fn();
+      // en Node, `performance.getEntriesByType('navigation')` ne donne rien : valeur par défaut
+      const r = await installerOngletPrincipal({
+        nav: { aller: vi.fn(), aDesModifications: () => false }, href: URL_TACHE, referrer: MR,
+        fermer, locks: b.locks, creerCanal: b.creerCanal,
+      });
+      expect(r).toBe('ordinaire');
+      expect(fermer).not.toHaveBeenCalled();
+    });
+
+    it('le type par défaut est lu dans performance.getEntriesByType', async () => {
+      vi.stubGlobal('performance', { getEntriesByType: () => [{ type: 'navigate' }] });
+      const b = navigateur();
+      await onglet(b).resultat;
+      const fermer = vi.fn();
+      const r = installerOngletPrincipal({
+        nav: { aller: vi.fn(), aDesModifications: () => false }, href: URL_TACHE, referrer: MR,
+        fermer, locks: b.locks, creerCanal: b.creerCanal, aleatoire: () => 'abc',
+      });
+      expect(await r).toBe('transmis');
+      expect(fermer).toHaveBeenCalledTimes(1);
+    });
+
+    it('un principal rechargé n’exécute pas la commande réduite', async () => {
+      const b = navigateur();
+      const a = onglet(b, { type: 'reload' });
+      expect(await a.resultat).toBe('principal');
+      expect(a.n.aller).not.toHaveBeenCalled();
+    });
+
+    it('un onglet qui porte des modifications reste ordinaire, sans rien envoyer ni fermer', async () => {
+      const b = navigateur();
+      await onglet(b).resultat;
+      b.diffuses.length = 0;
+      const c = onglet(b, { modifs: true });
+      expect(await c.resultat).toBe('ordinaire');
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(b.diffuses).toEqual([]);
+      expect(c.fermer).not.toHaveBeenCalled();
+      expect(console.info).toHaveBeenCalledWith('[sb-osm]', 'onglet ordinaire');
+    });
+
+    it('des modifications apparues pendant l’attente de l’accusé empêchent la fermeture', async () => {
+      const b = navigateur();
+      await onglet(b).resultat;
+      const c = onglet(b);
+      c.n.aDesModifications.mockReturnValueOnce(false).mockReturnValue(true);
+      expect(await c.resultat).toBe('ordinaire');
+      expect(c.fermer).not.toHaveBeenCalled();
+    });
+
+    it('aDesModifications qui lève : dans le doute, on ne ferme rien', async () => {
+      const b = navigateur();
+      await onglet(b).resultat;
+      const c = onglet(b);
+      c.n.aDesModifications.mockImplementation(() => { throw new Error('x'); });
+      expect(await c.resultat).toBe('ordinaire');
+      expect(c.fermer).not.toHaveBeenCalled();
+    });
+
+    it('navigate et sans modification : transmet comme avant', async () => {
+      const b = navigateur();
+      await onglet(b).resultat;
+      const c = onglet(b, { type: 'navigate', modifs: false });
+      expect(await c.resultat).toBe('transmis');
+      expect(c.fermer).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('API Web Locks absente : onglet ordinaire, rien n’est fait', async () => {
     vi.stubGlobal('navigator', {});
-    const n = { aller: vi.fn() };
+    const n = { aller: vi.fn(), aDesModifications: () => false };
     const fermer = vi.fn();
     const creerCanal = vi.fn();
-    expect(await installerOngletPrincipal({ nav: n, href: URL_TACHE, referrer: MR, fermer, creerCanal })).toBe('ordinaire');
+    expect(await installerOngletPrincipal({ nav: n, href: URL_TACHE, referrer: MR, typeNavigation: 'navigate', fermer, creerCanal })).toBe('ordinaire');
     expect(creerCanal).not.toHaveBeenCalled();
     expect(n.aller).not.toHaveBeenCalled();
     expect(fermer).not.toHaveBeenCalled();
@@ -250,9 +340,9 @@ describe('installerOngletPrincipal', () => {
   it('BroadcastChannel absent : onglet ordinaire, rien n’est fait', async () => {
     vi.stubGlobal('BroadcastChannel', undefined);
     const b = navigateur();
-    const n = { aller: vi.fn() };
+    const n = { aller: vi.fn(), aDesModifications: () => false };
     const fermer = vi.fn();
-    expect(await installerOngletPrincipal({ nav: n, href: URL_TACHE, referrer: MR, fermer, locks: b.locks })).toBe('ordinaire');
+    expect(await installerOngletPrincipal({ nav: n, href: URL_TACHE, referrer: MR, typeNavigation: 'navigate', fermer, locks: b.locks })).toBe('ordinaire');
     expect(b.locks.request).not.toHaveBeenCalled();
     expect(n.aller).not.toHaveBeenCalled();
     expect(fermer).not.toHaveBeenCalled();

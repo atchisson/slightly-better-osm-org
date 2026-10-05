@@ -39,6 +39,12 @@ describe('commandeDepuisUrl', () => {
     expect(c.ids).toEqual(['w5', 'n9']);
   });
 
+  it('ne répète pas un objet présent dans la requête et dans le hash', () => {
+    const c = commandeDepuisUrl('https://www.openstreetmap.org/edit?way=456#id=w456&map=18/1/2')!;
+    expect(c.ids).toEqual(['w456']);
+    expect(commandeDepuisUrl('https://www.openstreetmap.org/edit?way=1,1#id=w1,n2')!.ids).toEqual(['w1', 'n2']);
+  });
+
   it('rend null sans rien d’utile', () => {
     expect(commandeDepuisUrl('https://www.openstreetmap.org/edit?editor=id')).toBeNull();
     expect(commandeDepuisUrl('https://www.openstreetmap.org/edit?editor=id#background=x&presets=a')).toBeNull();

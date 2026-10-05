@@ -190,6 +190,39 @@ async function scenarios(browser) {
   check('C2 il se déclare ordinaire', aLog(context, manuel.num, '[sb-osm] onglet ordinaire'));
   check('C3 il ne transmet rien', !aLog(context, manuel.num, 'commande transmise'));
   check('C4 le principal est resté ouvert', !second.isClosed());
+
+  // ---- E : un onglet rechargé ne transmet jamais, ni ne se ferme -------------------------------
+  // `document.referrer` survit à F5 : sans garde, un onglet resté « ordinaire » (principal occupé),
+  // édité puis rechargé, transmettrait son URL périmée et se fermerait avec ses modifications.
+  // On rend le principal muet (il garde le verrou mais ses accusés ne partent plus) pour que la
+  // tâche suivante, venue de MapRoulette, finisse « ordinaire » au bout du délai de 3 s. (Un
+  // Debugger.pause CDP ne convient pas : Chrome peut loger les deux onglets dans un même processus,
+  // et figer aussi le nouvel onglet.)
+  const frameSecond = await idFrame(second);
+  await frameSecond.evaluate(() => {
+    const orig = BroadcastChannel.prototype.postMessage;
+    window.__postOrig = orig;
+    BroadcastChannel.prototype.postMessage = function (m) { if (m && m.type === 'recu') return; return orig.call(this, m); };
+  });
+  const gele = await ouvrir(context, mr, '#t2');
+  check('E1 principal muet : la tâche suivante reste un onglet ordinaire (délai de 3 s)',
+    await attendre(async () => aLog(context, gele.num, '[sb-osm] onglet ordinaire'), 30000));
+  await sleep(1000);
+  check('E2 elle n’est pas fermée', !gele.isClosed());
+  await frameSecond.evaluate(() => { BroadcastChannel.prototype.postMessage = window.__postOrig; });   // il répond de nouveau
+  await sleep(1000);
+  const avantRecharge = context.journal.length;
+  await gele.reload();
+  await idFrame(gele);
+  await sleep(6000);
+  check('E3 rechargé alors que le principal répond, l’onglet reste ouvert', !gele.isClosed());
+  check('E4 il ne transmet rien après le rechargement',
+    !context.journal.slice(avantRecharge).some(j => j.num === gele.num && j.text.includes('commande transmise')));
+  check('E5 il se déclare ordinaire après le rechargement',
+    context.journal.slice(avantRecharge).some(j => j.num === gele.num && j.text.includes('[sb-osm] onglet ordinaire')));
+  // F (ne jamais fermer un onglet qui porte des modifications) n'est couvert que par les tests
+  // unitaires : provoquer une modification AVANT la décision de transmission serait une course, et
+  // l'injecter exigerait un point d'entrée de test dans le code de production.
   await context.close();
 
   // ---- D : sans Web Locks, comportement d'origine ----------------------------------------------
