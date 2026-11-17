@@ -1,7 +1,9 @@
 import {
   captureContext, makeBridge, raceCaptureAgainstTimeout, CAPTURE_TIMEOUT_MS,
   SURFACE_READY_TIMEOUT_MS, DISABLE_HINT, looksLikeIdDocument, makeNavigation,
+  injecteApresAmorcage,
 } from './bridge/capture';
+import { relancerApresInjectionTardive, oublierRelances, RELANCES_MAX } from './bridge/relance';
 import { installerOngletPrincipal } from './remote/onglet';
 import { createMode } from './mode';
 import { createCtrlShortcut } from './ui/shortcut';
@@ -31,11 +33,43 @@ function referentDuCadrePrincipal(): string {
 // sont indiscernables : silence dans les deux cas. iD tourne dans une iframe servie à
 // `/id` ; le script cible aussi `/edit` (le document parent). Savoir dans lequel des
 // deux ce point a été atteint est le premier réflexe de débogage.
+// `readyState` est lu ici, avant tout `await` : c'est lui qui dit si osm.org a déjà
+// appelé coreContext() quand le script arrive (voir injecteApresAmorcage).
+const etatInjection = document.readyState;
 log('injecté —', location.pathname,
-  window === window.top ? '(cadre principal)' : '(iframe)', '· build', BUILD);
+  window === window.top ? '(cadre principal)' : '(iframe)', '· document', etatInjection,
+  '· build', BUILD);
+
+/** `sessionStorage` de ce document, ou `null` s'il est illisible (stockage bloqué...). */
+function stockageDeSession(): Storage | null {
+  try { return window.sessionStorage; } catch { return null; }
+}
 
 void (async () => {
-  const capture = await raceCaptureAgainstTimeout(captureContext(), CAPTURE_TIMEOUT_MS);
+  // Injecté après le DOMContentLoaded de l'éditeur : osm.org a déjà appelé
+  // coreContext() et n'a gardé le contexte que dans une fermeture, la capture est
+  // impossible. Inutile d'attendre le chien de garde : on recharge l'iframe, borné
+  // (src/bridge/relance.ts). `#id-container` est déjà analysé à ce stade, le test
+  // de document est donc fiable dès maintenant.
+  if (injecteApresAmorcage(etatInjection) && looksLikeIdDocument(document)) {
+    const essai = relancerApresInjectionTardive(stockageDeSession(), () => location.reload());
+    if (essai > 0) {
+      console.warn(
+        `[sb-osm] script injecté trop tard (document « ${etatInjection} ») : osm.org avait ` +
+        `déjà créé le contexte iD. Rechargement de l'éditeur (essai ${essai}/${RELANCES_MAX}).`,
+      );
+      return;
+    }
+    console.warn(
+      `[sb-osm] désactivé : script injecté trop tard (document « ${etatInjection} ») malgré ` +
+      `${RELANCES_MAX} rechargements — osm.org avait déjà créé le contexte iD, qui n'est plus ` +
+      "atteignable. Course d'injection du gestionnaire de userscripts, pas une rupture d'iD.",
+    );
+    return;
+  }
+
+  const captureEnCours = captureContext();
+  const capture = await raceCaptureAgainstTimeout(captureEnCours, CAPTURE_TIMEOUT_MS);
   if (capture.status === 'timed-out') {
     // Troisième lancement réel : ce chien de garde s'arme dans TOUT document qui
     // matche `@match`, et `window.iD` n'est jamais assigné dans le document `/edit` —
@@ -62,8 +96,18 @@ void (async () => {
       `[sb-osm] désactivé : le contexte iD n'a jamais été capturé (${CAPTURE_TIMEOUT_MS / 1000} s ` +
       `écoulées) ; le greffon reste inactif, l'éditeur n'est pas affecté. ${DISABLE_HINT}`,
     );
+    // Diagnostic seulement : distingue un chargement lent (la capture finit par
+    // arriver) d'une capture qui n'arrivera jamais. Le greffon reste désactivé.
+    const debut = performance.now();
+    void captureEnCours.then(() => console.warn(
+      `[sb-osm] le contexte iD est arrivé ${((performance.now() - debut) / 1000 + CAPTURE_TIMEOUT_MS / 1000).toFixed(1)} s ` +
+      "après l'injection, au-delà du délai : chargement lent, pas une rupture d'iD.",
+    ));
     return;
   }
+
+  // Capture réussie : un futur retard d'injection dans cet onglet repart de zéro.
+  oublierRelances(stockageDeSession());
 
   let bridge;
   try {

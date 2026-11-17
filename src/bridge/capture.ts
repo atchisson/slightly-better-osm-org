@@ -129,6 +129,23 @@ export function looksLikeIdDocument(doc: Document): boolean {
 }
 
 /**
+ * Vrai si le script a été injecté APRÈS que osm.org a appelé `iD.coreContext()`.
+ *
+ * L'amorçage d'osm.org (app/assets/javascripts/id.js) appelle `coreContext()` une seule
+ * fois, dans un écouteur DOMContentLoaded, et ne garde le contexte que dans une
+ * fermeture : aucune globale ne permet de le retrouver ensuite. `readyState` quitte
+ * `'loading'` juste avant que DOMContentLoaded parte, dans la même tâche ; un
+ * gestionnaire de userscripts qui injecte de façon asynchrone (la CSP d'osm.org bloque
+ * l'injection inline de Violentmonkey sous Firefox) ne peut pas s'intercaler entre les
+ * deux. Lu au tout premier acte du script, `readyState !== 'loading'` signifie donc
+ * que la capture est devenue impossible — une course d'injection, pas une rupture des
+ * internes d'iD.
+ */
+export function injecteApresAmorcage(readyState: DocumentReadyState): boolean {
+  return readyState !== 'loading';
+}
+
+/**
  * Attend que `svg.surface` apparaisse quelque part sous `container`, borné par
  * `timeoutMs`. Résout `true` dès que trouvé, `false` si le délai s'écoule d'abord — ne
  * rejette et ne lève JAMAIS, pour la même raison que `raceCaptureAgainstTimeout` : une

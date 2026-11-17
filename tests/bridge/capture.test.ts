@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   captureContext, makeBridge, raceCaptureAgainstTimeout, waitForSurface, looksLikeIdDocument,
+  injecteApresAmorcage,
 } from '../../src/bridge/capture';
 
 describe('captureContext', () => {
@@ -1250,5 +1251,23 @@ describe('createBuilding — coudre le mur d’un voisin, en une seule transacti
     } finally {
       delete (globalThis as any).iD;
     }
+  });
+});
+
+// Échec intermittent observé en réel (Firefox + Violentmonkey) : « Ctrl ne fait rien »,
+// avec en console « le contexte iD n'a jamais été capturé (8 s écoulées) ». osm.org
+// n'appelle `iD.coreContext()` qu'UNE fois, dans son écouteur DOMContentLoaded, et ne
+// garde le contexte que dans une fermeture (app/assets/javascripts/id.js). Un script
+// injecté après cet écouteur arrive trop tard pour toujours : le piège est posé, mais
+// plus personne n'appellera coreContext(). Ce n'est pas une rupture des internes d'iD,
+// et le message ne doit pas le laisser croire.
+describe('injecteApresAmorcage — le script est-il arrivé après l’appel de coreContext() ?', () => {
+  it('non tant que le document est encore en cours d’analyse', () => {
+    expect(injecteApresAmorcage('loading')).toBe(false);
+  });
+
+  it('oui dès que DOMContentLoaded est passé', () => {
+    expect(injecteApresAmorcage('interactive')).toBe(true);
+    expect(injecteApresAmorcage('complete')).toBe(true);
   });
 });
