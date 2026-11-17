@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "node esbuild.config.mjs",
+    "build:dev": "node esbuild.config.mjs --dev",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

@@ -74,24 +74,55 @@ const bannerVersionne = meta.replace(
   (_, prefixe, version) => `${prefixe}${tag || `${version}.${stamp}`}`
 );
 
+// Variante de développement (`npm run build:dev`) : un script DISTINCT pour le
+// gestionnaire, installable à côté de la release sans la remplacer. Violentmonkey et
+// Tampermonkey identifient un script par `@name` + `@namespace` : les mêmes valeurs
+// font proposer la version locale comme une mise à jour de la release (et
+// inversement). Sans `@downloadURL`/`@updateURL`, la vérification de mises à jour ne
+// peut pas non plus écraser la version locale par la release publiée.
+const dev = process.argv.includes('--dev');
+
+/**
+ * @param {string} texte
+ * @param {RegExp} motif
+ * @param {string | ((ligne: string, prefixe: string, valeur: string) => string)} remplacement
+ * @param {string} quoi
+ */
+function remplacerLigne(texte, motif, remplacement, quoi) {
+  if (!motif.test(texte)) {
+    throw new Error(`esbuild.config.mjs : aucune ligne ${quoi} trouvée dans le bandeau de src/meta.ts.`);
+  }
+  return texte.replace(motif, /** @type {any} */ (remplacement));
+}
+
+let banniere = bannerVersionne;
+if (dev) {
+  banniere = remplacerLigne(banniere, /(\/\/ @name\s+)(.+)/, (_, p, nom) => `${p}${nom} (dev)`, '@name');
+  banniere = remplacerLigne(banniere, /(\/\/ @namespace\s+)(\S+)/, (_, p, ns) => `${p}${ns}/dev`, '@namespace');
+  banniere = remplacerLigne(banniere, /\/\/ @downloadURL.*\r?\n/, '', '@downloadURL');
+  banniere = remplacerLigne(banniere, /\/\/ @updateURL.*\r?\n/, '', '@updateURL');
+}
+
+const sortie = dev ? 'dist/slightly-better-osm-org.dev.user.js' : 'dist/slightly-better-osm-org.user.js';
+
 await build({
   entryPoints: ['src/main.ts'],
   bundle: true,
   format: 'iife',
   target: 'es2022',
-  outfile: 'dist/slightly-better-osm-org.user.js',
-  banner: { js: bannerVersionne },
-  define: { __BUILD__: JSON.stringify(tag || `0.1.0.${stamp}`) },
+  outfile: sortie,
+  banner: { js: banniere },
+  define: { __BUILD__: JSON.stringify(`${tag || `0.1.0.${stamp}`}${dev ? ' (dev)' : ''}`) },
   legalComments: 'none',
 });
 
-const out = readFileSync('dist/slightly-better-osm-org.user.js', 'utf8');
+const out = readFileSync(sortie, 'utf8');
 if (!out.startsWith(BANNER_START)) {
   throw new Error(
-    `esbuild.config.mjs : dist/slightly-better-osm-org.user.js ne commence pas par le bandeau ${JSON.stringify(
+    `esbuild.config.mjs : ${sortie} ne commence pas par le bandeau ${JSON.stringify(
       BANNER_START
     )} attendu. La construction a produit un artefact invalide.`
   );
 }
 
-console.log('dist/slightly-better-osm-org.user.js écrit');
+console.log(`${sortie} écrit`);
