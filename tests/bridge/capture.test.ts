@@ -2,12 +2,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   captureContext, makeBridge, raceCaptureAgainstTimeout, waitForSurface, looksLikeIdDocument,
-  injecteApresAmorcage,
+  injecteApresAmorcage, deposerContexte, contexteDepose, contexteDejaDepose, surveillerIframeId,
+  etatPiege, mondeExecution,
 } from '../../src/bridge/capture';
 
 describe('captureContext', () => {
   beforeEach(() => {
     delete (globalThis as any).iD;
+    delete (globalThis as any)[Symbol.for('sb-osm/piege-iD')];
     vi.resetModules();
   });
 
@@ -1269,5 +1271,196 @@ describe('injecteApresAmorcage — le script est-il arrivé après l’appel de 
   it('oui dès que DOMContentLoaded est passé', () => {
     expect(injecteApresAmorcage('interactive')).toBe(true);
     expect(injecteApresAmorcage('complete')).toBe(true);
+  });
+});
+
+// Constaté en réel : dans l'iframe `/id`, Violentmonkey injecte en retard à CHAQUE
+// chargement (même après rechargement : iD.js en cache, l'amorçage n'en va que plus
+// vite), alors que le cadre principal `/edit` est toujours injecté en `loading`. Le
+// cadre principal, de même origine, pose donc le piège sur la fenêtre de l'iframe
+// pendant qu'elle se charge, et y dépose le contexte capturé : le script de l'iframe,
+// même tardif, le reprend.
+describe('captureContext sur une autre fenêtre, et dépôt du contexte', () => {
+  const nouvelleFenetre = (): Window & Record<string, any> => {
+    const f = document.createElement('iframe');
+    document.body.appendChild(f);
+    return f.contentWindow as Window & Record<string, any>;
+  };
+
+  it('piège `iD` sur la fenêtre cible, pas sur la sienne', async () => {
+    const win = nouvelleFenetre();
+    const promise = captureContext(win);
+    const faux = { marker: 'iframe' };
+    win.iD = { coreContext: () => faux };
+    expect((globalThis as any).iD).toBeUndefined();
+    expect(win.iD.coreContext()).toBe(faux);
+    await expect(promise).resolves.toBe(faux);
+  });
+
+  it('le contexte déposé avant l’arrivée du script est repris aussitôt', async () => {
+    const win = nouvelleFenetre();
+    const faux = { marker: 'deja-la' };
+    deposerContexte(win, faux);
+    expect(contexteDejaDepose(win)).toBe(true);
+    await expect(contexteDepose(win)).resolves.toBe(faux);
+  });
+
+  it('le contexte déposé après l’arrivée du script est attendu', async () => {
+    const win = nouvelleFenetre();
+    expect(contexteDejaDepose(win)).toBe(false);
+    const promise = contexteDepose(win);
+    const faux = { marker: 'plus-tard' };
+    deposerContexte(win, faux);
+    await expect(promise).resolves.toBe(faux);
+  });
+
+  it('le dépôt n’est pas une propriété énumérable de la fenêtre', () => {
+    const win = nouvelleFenetre();
+    deposerContexte(win, {});
+    expect(Object.prototype.propertyIsEnumerable.call(win, Symbol.for('sb-osm/contexte-iD'))).toBe(false);
+  });
+
+  // Constaté en réel (Synchronous page mode) : les deux cadres sont injectés à temps et
+  // posent chacun leur piège sur la fenêtre de l'iframe. Le second s'abstenait (un
+  // accesseur existait déjà) et ne résolvait jamais ; aucune capture n'aboutissait.
+  it('deux pièges sur la même fenêtre capturent tous les deux, quel que soit l’ordre', async () => {
+    const win = nouvelleFenetre();
+    const premier = captureContext(win);
+    const second = captureContext(win);
+    const faux = { marker: 'les-deux' };
+    win.iD = { coreContext: () => faux };
+    expect(win.iD.coreContext()).toBe(faux);
+    await expect(premier).resolves.toBe(faux);
+    await expect(second).resolves.toBe(faux);
+  });
+
+  it('le second piège reprend l’accesseur tant qu’iD n’est pas affecté', () => {
+    // Le script de l'iframe, arrivé à temps, remplace le piège posé depuis le cadre
+    // principal par le sien, du même royaume que la page : le chemin éprouvé.
+    const win = nouvelleFenetre();
+    void captureContext(win);
+    const avant = Object.getOwnPropertyDescriptor(win, 'iD')!.set;
+    void captureContext(win);
+    expect(Object.getOwnPropertyDescriptor(win, 'iD')!.set).not.toBe(avant);
+  });
+
+  it('un piège arrivé après l’affectation d’iD s’abonne sans masquer le namespace', async () => {
+    const win = nouvelleFenetre();
+    const premier = captureContext(win);
+    const faux = { marker: 'apres' };
+    win.iD = { coreContext: () => faux, version: '2.30.0' };
+    const second = captureContext(win);
+    expect(win.iD.version).toBe('2.30.0');
+    expect(win.iD.coreContext()).toBe(faux);
+    await expect(premier).resolves.toBe(faux);
+    await expect(second).resolves.toBe(faux);
+  });
+
+  it('respecte l’accesseur `iD` d’un tiers', () => {
+    const win = nouvelleFenetre();
+    const get = () => 'tiers';
+    Object.defineProperty(win, 'iD', { get, configurable: true });
+    void captureContext(win);
+    expect(Object.getOwnPropertyDescriptor(win, 'iD')!.get).toBe(get);
+    expect(etatPiege(win)).toBe('tiers');
+  });
+
+  it('dit où en est le piège, pour le diagnostic d’une capture manquée', () => {
+    const win = nouvelleFenetre();
+    expect(etatPiege(win)).toBe('absent');
+    void captureContext(win);
+    expect(etatPiege(win)).toBe('pose');
+    win.iD = { coreContext: () => ({}) };
+    expect(etatPiege(win)).toBe('iD-affecte');
+    win.iD.coreContext();
+    expect(etatPiege(win)).toBe('coreContext-appele');
+  });
+});
+
+describe('mondeExecution — le script voit-il la vraie fenêtre de la page ?', () => {
+  it('isolé quand le gestionnaire le déclare', () => {
+    expect(mondeExecution({}, { injectInto: 'content' })).toBe('isole');
+  });
+
+  it('isolé quand `window` est la vue filtrée d’un script de contenu Firefox', () => {
+    // Constaté en réel : `typeof iD` y vaut « undefined » alors que l'éditeur tourne.
+    expect(mondeExecution({ wrappedJSObject: {} }, undefined)).toBe('isole');
+  });
+
+  it('page quand le gestionnaire le déclare et que rien ne le contredit', () => {
+    expect(mondeExecution({}, { injectInto: 'page' })).toBe('page');
+  });
+
+  it('inconnu sans indice (Tampermonkey, tests)', () => {
+    expect(mondeExecution({}, undefined)).toBe('inconnu');
+  });
+});
+
+describe('surveillerIframeId — poser le piège depuis le cadre principal', () => {
+  type DocFactice = { readyState: DocumentReadyState; location: { pathname: string }; defaultView: unknown };
+  const cadre = (iframe: { contentDocument: DocFactice | null } | null) =>
+    ({ getElementById: (id: string) => (id === 'id-embed' ? iframe : null) }) as unknown as Document;
+
+  it('piège la fenêtre de l’iframe `/id` tant qu’elle se charge', async () => {
+    vi.useFakeTimers();
+    try {
+      const vue = {};
+      const iframe = { contentDocument: null as DocFactice | null };
+      const capturer = vi.fn(() => new Promise<unknown>(() => {}));
+      const resultat = surveillerIframeId(cadre(iframe), capturer, 1000);
+      await vi.advanceTimersByTimeAsync(20);
+      expect(capturer).not.toHaveBeenCalled();
+      // about:blank d'abord : jamais piégé, ce n'est pas l'éditeur.
+      iframe.contentDocument = { readyState: 'complete', location: { pathname: 'blank' }, defaultView: {} };
+      await vi.advanceTimersByTimeAsync(20);
+      expect(capturer).not.toHaveBeenCalled();
+      iframe.contentDocument = { readyState: 'loading', location: { pathname: '/id' }, defaultView: vue };
+      await vi.advanceTimersByTimeAsync(20);
+      expect(capturer).toHaveBeenCalledWith(vue);
+      await expect(resultat).resolves.toBe('piege');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('signale une iframe `/id` déjà chargée quand il la voit : trop tard pour piéger', async () => {
+    vi.useFakeTimers();
+    try {
+      const iframe = { contentDocument: { readyState: 'interactive', location: { pathname: '/id' }, defaultView: {} } as DocFactice };
+      const capturer = vi.fn(() => new Promise<unknown>(() => {}));
+      const resultat = surveillerIframeId(cadre(iframe), capturer, 1000);
+      await vi.advanceTimersByTimeAsync(20);
+      await expect(resultat).resolves.toBe('trop-tard');
+      expect(capturer).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('abandonne sans bruit quand aucune iframe d’iD n’apparaît', async () => {
+    vi.useFakeTimers();
+    try {
+      const resultat = surveillerIframeId(cadre(null), vi.fn(), 1000);
+      await vi.advanceTimersByTimeAsync(1100);
+      await expect(resultat).resolves.toBe('absente');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('dépose dans l’iframe le contexte capturé', async () => {
+    vi.useFakeTimers();
+    try {
+      const f = document.createElement('iframe');
+      document.body.appendChild(f);
+      const vue = f.contentWindow!;
+      const faux = { marker: 'capture' };
+      const iframe = { contentDocument: { readyState: 'loading', location: { pathname: '/id' }, defaultView: vue } as DocFactice };
+      await surveillerIframeId(cadre(iframe), () => Promise.resolve(faux), 1000);
+      await vi.advanceTimersByTimeAsync(0);
+      await expect(contexteDepose(vue)).resolves.toBe(faux);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

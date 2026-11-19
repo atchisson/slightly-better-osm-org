@@ -1,9 +1,10 @@
 import {
   captureContext, makeBridge, raceCaptureAgainstTimeout, CAPTURE_TIMEOUT_MS,
   SURFACE_READY_TIMEOUT_MS, DISABLE_HINT, looksLikeIdDocument, makeNavigation,
-  injecteApresAmorcage,
+  injecteApresAmorcage, surveillerIframeId, contexteDepose, contexteDejaDepose, etatPiege,
+  mondeExecution, definirNamespaceID,
 } from './bridge/capture';
-import { relancerApresInjectionTardive, oublierRelances, RELANCES_MAX } from './bridge/relance';
+import { outilsFirefox, creerMembrane, captureContextIsole } from './bridge/monde-isole';
 import { installerOngletPrincipal } from './remote/onglet';
 import { createMode } from './mode';
 import { createCtrlShortcut } from './ui/shortcut';
@@ -36,39 +37,71 @@ function referentDuCadrePrincipal(): string {
 // `readyState` est lu ici, avant tout `await` : c'est lui qui dit si osm.org a déjà
 // appelé coreContext() quand le script arrive (voir injecteApresAmorcage).
 const etatInjection = document.readyState;
+// Fourni par le gestionnaire de userscripts (Violentmonkey y déclare `injectInto`), même
+// sous `@grant none` ; absent des tests.
+declare const GM_info: unknown;
+const monde = mondeExecution(window, typeof GM_info === 'undefined' ? undefined : GM_info);
 log('injecté —', location.pathname,
   window === window.top ? '(cadre principal)' : '(iframe)', '· document', etatInjection,
-  '· build', BUILD);
+  '· monde', monde, '· build', BUILD);
 
-/** `sessionStorage` de ce document, ou `null` s'il est illisible (stockage bloqué...). */
-function stockageDeSession(): Storage | null {
-  try { return window.sessionStorage; } catch { return null; }
+// Monde isolé de l'extension (Firefox : la CSP d'osm.org y relègue Violentmonkey) :
+// `window` n'y est qu'une vue filtrée de la page, qui masque `iD`. Avec les outils de
+// Firefox, on parle quand même à la page, à travers une membrane (bridge/monde-isole.ts).
+// Sans eux, rien n'est possible : inutile d'attendre le chien de garde pour finir sur un
+// faux diagnostic de rupture d'iD.
+const isole = monde === 'isole';
+const outils = isole ? outilsFirefox(window) : null;
+const membrane = outils ? creerMembrane(outils) : null;
+if (outils && membrane) {
+  definirNamespaceID(() => membrane.sortir(outils.page.iD));
+  if (window !== window.top) log('monde isolé : passage par la page via les outils de Firefox');
+} else if (isole && window !== window.top) {
+  console.warn(
+    "[sb-osm] désactivé : le gestionnaire de userscripts exécute le script dans son monde " +
+    "isolé (mode « content »), d'où l'éditeur iD est invisible, et les outils de Firefox " +
+    "pour en sortir (wrappedJSObject, exportFunction) sont absents ici.",
+  );
+}
+
+// Cadre principal (`/edit`) : il est injecté à temps, contrairement à l'iframe `/id` où
+// vit l'éditeur. Il pose le piège sur la fenêtre de l'iframe pendant qu'elle se charge
+// et y dépose le contexte capturé, que le script de l'iframe reprend s'il arrive trop
+// tard pour capturer lui-même (voir surveillerIframeId).
+if (window === window.top && !isole) {
+  void surveillerIframeId(document, win => captureContext(win).then(ctx => {
+    log("contexte iD capturé depuis le cadre principal, transmis à l'iframe de l'éditeur");
+    return ctx;
+  })).then(resultat => {
+    if (resultat === 'piege') log("piège posé depuis le cadre principal sur l'iframe de l'éditeur (en cours de chargement)");
+    if (resultat === 'trop-tard') {
+      log("iframe de l'éditeur déjà chargée quand le cadre principal l'a vue : pas de piège posé");
+    }
+  });
 }
 
 void (async () => {
+  if (isole && !membrane) return; // signalé plus haut, dans l'iframe de l'éditeur
+
   // Injecté après le DOMContentLoaded de l'éditeur : osm.org a déjà appelé
-  // coreContext() et n'a gardé le contexte que dans une fermeture, la capture est
-  // impossible. Inutile d'attendre le chien de garde : on recharge l'iframe, borné
-  // (src/bridge/relance.ts). `#id-container` est déjà analysé à ce stade, le test
-  // de document est donc fiable dès maintenant.
-  if (injecteApresAmorcage(etatInjection) && looksLikeIdDocument(document)) {
-    const essai = relancerApresInjectionTardive(stockageDeSession(), () => location.reload());
-    if (essai > 0) {
-      console.warn(
-        `[sb-osm] script injecté trop tard (document « ${etatInjection} ») : osm.org avait ` +
-        `déjà créé le contexte iD. Rechargement de l'éditeur (essai ${essai}/${RELANCES_MAX}).`,
-      );
-      return;
-    }
+  // coreContext() et n'a gardé le contexte que dans une fermeture. Seul le dépôt du
+  // cadre principal peut encore servir, et il est fait à ce stade s'il doit l'être
+  // (pendant l'appel à coreContext(), donc avant toute tâche ultérieure). Sans lui,
+  // inutile d'attendre le chien de garde. `#id-container` est déjà analysé ici.
+  if (injecteApresAmorcage(etatInjection) && looksLikeIdDocument(document) && !contexteDejaDepose(window)) {
     console.warn(
-      `[sb-osm] désactivé : script injecté trop tard (document « ${etatInjection} ») malgré ` +
-      `${RELANCES_MAX} rechargements — osm.org avait déjà créé le contexte iD, qui n'est plus ` +
-      "atteignable. Course d'injection du gestionnaire de userscripts, pas une rupture d'iD.",
+      `[sb-osm] désactivé : script injecté trop tard (document « ${etatInjection} ») — osm.org ` +
+      "avait déjà créé le contexte iD, et le cadre principal n'a pas pu le capturer. Course " +
+      "d'injection du gestionnaire de userscripts, pas une rupture d'iD ; recharger la page.",
     );
     return;
   }
 
-  const captureEnCours = captureContext();
+  const etatAvant = etatPiege(window);
+  if (etatAvant !== 'absent') log('piège sur `iD` trouvé à l’arrivée :', etatAvant);
+  const captureEnCours = outils && membrane
+    ? captureContextIsole(outils, membrane)
+    : Promise.race([captureContext(), contexteDepose(window)]);
   const capture = await raceCaptureAgainstTimeout(captureEnCours, CAPTURE_TIMEOUT_MS);
   if (capture.status === 'timed-out') {
     // Troisième lancement réel : ce chien de garde s'arme dans TOUT document qui
@@ -96,6 +129,10 @@ void (async () => {
       `[sb-osm] désactivé : le contexte iD n'a jamais été capturé (${CAPTURE_TIMEOUT_MS / 1000} s ` +
       `écoulées) ; le greffon reste inactif, l'éditeur n'est pas affecté. ${DISABLE_HINT}`,
     );
+    // Où la capture a décroché : piège jamais traversé par iD.js (« pose »), iD enveloppé
+    // mais coreContext() jamais appelé à travers lui (« iD-affecte »), etc.
+    log('diagnostic de capture — piège :', etatPiege(window), '· typeof iD :', typeof (window as { iD?: unknown }).iD,
+      '· dépôt du cadre principal :', contexteDejaDepose(window));
     // Diagnostic seulement : distingue un chargement lent (la capture finit par
     // arriver) d'une capture qui n'arrivera jamais. Le greffon reste désactivé.
     const debut = performance.now();
@@ -105,9 +142,6 @@ void (async () => {
     ));
     return;
   }
-
-  // Capture réussie : un futur retard d'injection dans cet onglet repart de zéro.
-  oublierRelances(stockageDeSession());
 
   let bridge;
   try {

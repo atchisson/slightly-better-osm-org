@@ -6,9 +6,6 @@ bâti français depuis le cadastre. Inspiré de [better-osm-org](https://github.
 1. Installer [Violentmonkey](https://violentmonkey.github.io/) (libre) ou [Tampermonkey](https://www.tampermonkey.net)
 2. [Installer le script](https://github.com/atchisson/slightly-better-osm-org/releases/latest/download/slightly-better-osm-org.user.js)
 
-Sous Firefox avec Violentmonkey, activer **Synchronous page mode** (Paramètres → Paramètres
-avancés) : sans lui, le script arrive parfois trop tard et l'éditeur doit être rechargé.
-
 Les mises à jour sont automatiques.
 
 ### Bâtiments et piscines depuis le cadastre

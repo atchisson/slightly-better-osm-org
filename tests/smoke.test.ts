@@ -7,6 +7,14 @@ describe('meta userscript', () => {
     expect(USERSCRIPT_META).toContain('@grant        none');
   });
 
+  it('ne force pas le monde de la page', () => {
+    // Essayé, puis retiré : sous Firefox, la CSP d'osm.org (`script-src 'self' 'nonce-…'`)
+    // bloque l'injection en page, et avec `@inject-into page` Violentmonkey n'injecte plus
+    // rien du tout (« impossible d'injecter certains scripts »). En mode « auto », il se
+    // rabat sur le monde isolé, que main.ts détecte et signale (voir mondeExecution).
+    expect(USERSCRIPT_META).not.toContain('@inject-into');
+  });
+
   it('cible seulement les chemins de l’éditeur (/edit et /id), pas tout le site', () => {
     // Le greffon n'est utile que dans l'éditeur : `/edit` (spike du 2026-09-23,
     // héberge l'iframe /id) et `/id` (où vit réellement iD). Un match site-wide

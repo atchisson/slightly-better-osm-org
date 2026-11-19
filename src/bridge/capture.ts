@@ -241,7 +241,7 @@ let bridgeInstanceCounter = 0;
  * cette fonction renvoie vrai, on n'enveloppe pas du tout : le namespace est exposé
  * intact, la capture ne se fait pas, et l'éditeur démarre normalement sans le greffon.
  */
-function hasFrozenCoreContext(namespace: unknown): boolean {
+export function hasFrozenCoreContext(namespace: unknown): boolean {
   if (namespace === null || (typeof namespace !== 'object' && typeof namespace !== 'function')) return false;
   const desc = Object.getOwnPropertyDescriptor(namespace, 'coreContext');
   return desc?.writable === false && desc.configurable === false;
@@ -258,57 +258,251 @@ function hasFrozenCoreContext(namespace: unknown): boolean {
  * 2. Tout est sous try/catch. En cas d'échec on rend le namespace intact : le plugin se
  *    désactive, l'éditeur démarre.
  */
-export function captureContext(): Promise<unknown> {
+export function captureContext(cible: object = globalThis): Promise<unknown> {
   return new Promise(resolve => {
-    let exposed: unknown = undefined;
-
-    const wrap = (namespace: any): any => new Proxy(namespace, {
-      get(target, prop, receiver) {
-        const value = Reflect.get(target, prop, receiver);
-        if (prop !== 'coreContext' || typeof value !== 'function') return value;
-        return function (this: unknown, ...args: unknown[]) {
-          const ctx = value.apply(this, args);
-          resolve(ctx);
-          return ctx;
-        };
-      },
-    });
-
-    const expose = (value: any): void => {
-      try {
-        if (hasFrozenCoreContext(value)) {
-          console.log(
-            "[sb-osm] désactivé : coreContext est une propriété figée (non " +
-            "configurable, non inscriptible) ; l'éditeur démarre normalement sans " +
-            `le greffon. ${DISABLE_HINT}`,
-          );
-          exposed = value;
-          return;
-        }
-        exposed = wrap(value);
-      } catch {
-        exposed = value; // iD doit démarrer même si on échoue
-      }
-    };
-
     try {
       // Le script est parfois injecté APRÈS iD.js (course d'injection du gestionnaire
       // de userscripts), qui a déjà fait `window.iD = index_exports`. Poser l'accesseur
       // sans reprendre cette valeur la masquait derrière `undefined` : le bootstrap
       // d'osm.org affichait alors « This editor is supported in Firefox… ». Un
       // accesseur déjà posé par un tiers n'est pas le nôtre à remplacer : on s'abstient.
-      const existing = Object.getOwnPropertyDescriptor(globalThis, 'iD');
-      if (existing && !('value' in existing)) return;
-      Object.defineProperty(globalThis, 'iD', {
-        configurable: true,
-        get: () => exposed,
-        set: expose,
-      });
-      if (existing && existing.value !== undefined) expose(existing.value);
+      const existing = Object.getOwnPropertyDescriptor(cible, 'iD');
+      const accesseur = !!existing && !('value' in existing);
+      const deja = piegeDe(cible);
+      if (accesseur && !deja) return;
+
+      // Deux scripts peuvent piéger la même fenêtre : celui de l'iframe et celui du cadre
+      // principal (voir surveillerIframeId). Le second s'abstenait et ne résolvait
+      // jamais — constaté en réel. Il s'abonne désormais au piège commun.
+      const piege: Piege = deja ?? { abonnes: [], affecte: false, appele: false };
+      if (!deja) Object.defineProperty(cible, CLE_PIEGE, { value: piege, configurable: true });
+      piege.abonnes.push(resolve);
+
+      // iD déjà enveloppé par l'autre piège : il nous préviendra à l'appel de coreContext.
+      if (accesseur && piege.affecte) return;
+      // Sinon on pose — ou on REPREND — l'accesseur : le dernier arrivé avant iD.js
+      // l'emporte. Quand le script de l'iframe arrive à temps, c'est donc son accesseur,
+      // du même royaume que la page, qui capte : le chemin éprouvé avant que le cadre
+      // principal ne s'en mêle.
+      const expose = poserAccesseur(cible, piege);
+      if (existing && 'value' in existing && existing.value !== undefined) expose(existing.value);
     } catch {
       /* on ne peut pas piéger : whenReady ne résoudra pas, l'auto-test désactivera */
     }
   });
+}
+
+/** Clé de l'état du piège sur la fenêtre, partagée entre les scripts des deux cadres. */
+const CLE_PIEGE = Symbol.for('sb-osm/piege-iD');
+
+interface Piege {
+  /** Les captures en attente, prévenues ensemble à l'appel de coreContext(). */
+  abonnes: ((ctx: unknown) => void)[];
+  /** `window.iD` a été affecté (et enveloppé) à travers l'accesseur. */
+  affecte: boolean;
+  /** coreContext() a été appelé à travers l'enveloppe. */
+  appele: boolean;
+}
+
+function piegeDe(cible: object): Piege | undefined {
+  try { return (cible as Record<symbol, Piege | undefined>)[CLE_PIEGE]; } catch { return undefined; }
+}
+
+/** Pose l'accesseur `iD` sur `cible` et rend la fonction qui expose un namespace. */
+function poserAccesseur(cible: object, piege: Piege): (value: any) => void {
+  let exposed: unknown = undefined;
+  piege.affecte = false;
+  piege.appele = false;
+
+  const wrap = (namespace: any): any => new Proxy(namespace, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (prop !== 'coreContext' || typeof value !== 'function') return value;
+      return function (this: unknown, ...args: unknown[]) {
+        const ctx = value.apply(this, args);
+        piege.appele = true;
+        for (const abonne of piege.abonnes) {
+          try { abonne(ctx); } catch { /* un abonné ne doit jamais casser l'amorçage d'iD */ }
+        }
+        return ctx;
+      };
+    },
+  });
+
+  const expose = (value: any): void => {
+    piege.affecte = true;
+    try {
+      if (hasFrozenCoreContext(value)) {
+        console.log(
+          "[sb-osm] désactivé : coreContext est une propriété figée (non " +
+          "configurable, non inscriptible) ; l'éditeur démarre normalement sans " +
+          `le greffon. ${DISABLE_HINT}`,
+        );
+        exposed = value;
+        return;
+      }
+      exposed = wrap(value);
+    } catch {
+      exposed = value; // iD doit démarrer même si on échoue
+    }
+  };
+
+  Object.defineProperty(cible, 'iD', {
+    configurable: true,
+    get: () => exposed,
+    set: expose,
+  });
+  return expose;
+}
+
+/**
+ * Le monde où tourne le script : celui de la page, ou le monde isolé de l'extension.
+ *
+ * Constaté en réel (Firefox + Violentmonkey en mode « auto ») : quand la CSP d'osm.org
+ * gêne l'injection dans la page, le gestionnaire exécute le script dans le monde isolé
+ * (« content »). `window` y est une vue filtrée (Xray) qui masque tout ce que la page a
+ * défini — `typeof iD` vaut « undefined » alors que l'éditeur tourne — et un piège posé
+ * dessus n'atteint jamais la page : la capture est impossible, quel que soit le moment.
+ * `@inject-into page` (src/meta.ts) l'interdit ; ceci le détecte s'il arrive quand même.
+ *
+ * `gmInfo` est le `GM_info` du gestionnaire (Violentmonkey y déclare `injectInto`).
+ * Sous Firefox, une fenêtre vue depuis un script de contenu porte `wrappedJSObject`.
+ */
+export function mondeExecution(win: object, gmInfo: unknown): 'page' | 'isole' | 'inconnu' {
+  let declare: unknown;
+  try { declare = (gmInfo as { injectInto?: unknown } | undefined)?.injectInto; } catch { /* illisible */ }
+  if (declare === 'content') return 'isole';
+  try {
+    if ((win as { wrappedJSObject?: unknown }).wrappedJSObject !== undefined) return 'isole';
+  } catch { /* illisible : on ne conclut pas */ }
+  return declare === 'page' ? 'page' : 'inconnu';
+}
+
+/**
+ * Où en est le piège sur `cible`, pour qu'une capture manquée dise où elle a échoué :
+ * aucun piège, accesseur d'un tiers, piège posé mais iD.js jamais passé par lui, iD
+ * affecté mais coreContext() jamais appelé à travers l'enveloppe, ou appelé. Ne lève jamais.
+ */
+export function etatPiege(cible: object):
+  'absent' | 'iD-sans-piege' | 'tiers' | 'pose' | 'iD-affecte' | 'coreContext-appele' {
+  try {
+    const piege = piegeDe(cible);
+    if (!piege) {
+      const d = Object.getOwnPropertyDescriptor(cible, 'iD');
+      if (!d) return 'absent';
+      return 'value' in d ? 'iD-sans-piege' : 'tiers';
+    }
+    if (piege.appele) return 'coreContext-appele';
+    return piege.affecte ? 'iD-affecte' : 'pose';
+  } catch {
+    return 'absent';
+  }
+}
+
+// --- Capture depuis le cadre principal -------------------------------------------
+//
+// Constaté en réel (Firefox + Violentmonkey) : dans l'iframe `/id`, le script est
+// injecté après le DOMContentLoaded À CHAQUE chargement — recharger n'y change rien,
+// iD.js est alors en cache et l'amorçage n'en va que plus vite. Le cadre principal
+// `/edit`, lui, est toujours injecté en `loading`. Les deux cadres sont de même
+// origine : le script de `/edit` lit l'iframe, y pose le piège pendant qu'elle se
+// charge, et dépose le contexte capturé dans sa fenêtre. Le script de `/id`, même
+// tardif, le reprend (voir src/main.ts).
+
+/** Clé du dépôt, partagée entre les deux cadres (registre de symboles commun aux royaumes). */
+const CLE_DEPOT = Symbol.for('sb-osm/contexte-iD');
+/** Événement émis sur la fenêtre de l'iframe au moment du dépôt. */
+const EVENEMENT_DEPOT = 'sb-osm:contexte-iD';
+
+/** Dépose `ctx` dans la fenêtre `win` et prévient un script qui l'attendrait déjà. Ne lève jamais. */
+export function deposerContexte(win: Window, ctx: unknown): void {
+  try {
+    Object.defineProperty(win, CLE_DEPOT, { value: ctx, configurable: true });
+    win.dispatchEvent(new (win as unknown as { Event: typeof Event }).Event(EVENEMENT_DEPOT));
+  } catch {
+    /* dépôt impossible : le script de l'iframe signalera l'absence de contexte */
+  }
+}
+
+/** Vrai si le cadre principal a déjà déposé un contexte dans `win`. */
+export function contexteDejaDepose(win: Window): boolean {
+  try { return CLE_DEPOT in win; } catch { return false; }
+}
+
+/** Contexte déposé dans `win` par le cadre principal : tout de suite s'il y est déjà, sinon à son dépôt. */
+export function contexteDepose(win: Window): Promise<unknown> {
+  return new Promise(resolve => {
+    const lire = (): unknown => (win as unknown as Record<symbol, unknown>)[CLE_DEPOT];
+    if (contexteDejaDepose(win)) { resolve(lire()); return; }
+    try {
+      win.addEventListener(EVENEMENT_DEPOT, () => resolve(lire()), { once: true });
+    } catch {
+      /* pas d'écoute possible : ne résout jamais, le chien de garde tranchera */
+    }
+  });
+}
+
+/** Pas de sondage de l'iframe : le minimum des minuteurs imbriqués, sans coût mesurable. */
+const SONDE_IFRAME_MS = 4;
+
+/** Durée maximale de surveillance de l'iframe depuis le cadre principal. */
+export const SURVEILLANCE_IFRAME_MS = 30_000;
+
+/**
+ * Surveille, depuis le cadre principal `doc`, l'iframe `#id-embed` (gabarit `edit` d'osm.org)
+ * jusqu'à ce que son document `/id` apparaisse. Encore en `loading`, sa fenêtre est piégée
+ * par `capturer` et le contexte obtenu y est déposé : `'piege'`. Déjà analysée : rien à
+ * faire, `'trop-tard'`. Aucune iframe d'iD dans le délai : `'absente'`.
+ *
+ * Un sondage, faute d'événement : rien ne signale au parent la création du document d'une
+ * iframe. Entre cette création et le DOMContentLoaded, iD.js (plusieurs Mo) doit être
+ * chargé puis exécuté ; l'iframe partage le fil du parent, qui reprend la main entre ces
+ * étapes. Ne lève jamais.
+ */
+export function surveillerIframeId(
+  doc: Document,
+  capturer: (win: Window) => Promise<unknown>,
+  delaiMs: number = SURVEILLANCE_IFRAME_MS,
+): Promise<'piege' | 'trop-tard' | 'absente'> {
+  return new Promise(resolve => {
+    const fin = Date.now() + delaiMs;
+    const sonder = (): void => {
+      let cadre: Document | null = null;
+      try {
+        cadre = (doc.getElementById('id-embed') as HTMLIFrameElement | null)?.contentDocument ?? null;
+      } catch {
+        cadre = null; // iframe d'une autre origine : rien à piéger ici
+      }
+      let estEditeur = false;
+      try { estEditeur = !!cadre && /^\/id\b/.test(cadre.location.pathname); } catch { /* illisible */ }
+      if (cadre && estEditeur) {
+        if (cadre.readyState !== 'loading') { resolve('trop-tard'); return; }
+        const win = cadre.defaultView as Window;
+        void capturer(win).then(ctx => deposerContexte(win, ctx));
+        resolve('piege');
+        return;
+      }
+      if (Date.now() >= fin) { resolve('absente'); return; }
+      setTimeout(sonder, SONDE_IFRAME_MS);
+    };
+    sonder();
+  });
+}
+
+/**
+ * Le namespace `iD` de la page, lu là où la jonction en a besoin (fabriques d'entités,
+ * d'actions et de modes, préférences). Dans le monde de la page, c'est `window.iD`.
+ * Depuis le monde isolé, `window.iD` est invisible : main.ts remplace ce fournisseur par
+ * la lecture du namespace de la page à travers la membrane (bridge/monde-isole.ts).
+ */
+let fournisseurNamespace: () => any = () => (globalThis as any).iD;
+
+export function definirNamespaceID(f: () => any): void {
+  fournisseurNamespace = f;
+}
+
+function namespaceID(): any {
+  return fournisseurNamespace();
 }
 
 /** Auto-test : refuse un contexte auquel manque une primitive attendue. */
@@ -369,7 +563,7 @@ export function makeNavigation(
             if (chargees.length < ids.length && ++essais <= SELECTION_ESSAIS_MAX) return;
             clearInterval(sonde);
             if (chargees.length > 0) {
-              const iD = (globalThis as any).iD;
+              const iD = namespaceID();
               c.enter(instancier(iD.modeSelect, c, chargees));
             }
           } catch (err) {
@@ -414,7 +608,7 @@ function ontDesChangements(c: any): boolean {
  * pour que « ce qui est déjà préparé » soit exactement ce qu'iD affichera. Illisible : ''.
  */
 function lireReglagesChangeset(): { comment: string; source: string } {
-  const iD = (globalThis as any).iD;
+  const iD = namespaceID();
   const lire = (k: string): string => {
     try {
       const v = iD && typeof iD.prefs === 'function' ? iD.prefs(k) : localStorage.getItem(k);
@@ -716,7 +910,7 @@ function buildBridge(c: any): IdBridge {
       insertions: (Insertion | null)[] = [],
       holes: HoleSpec[] = [],
     ): void {
-      const iD = (globalThis as any).iD;
+      const iD = namespaceID();
       const open = ring.slice(0, -1);
       const nodeIds: string[] = [];
       const created: any[] = [];
@@ -794,7 +988,7 @@ function buildBridge(c: any): IdBridge {
       // `source` de l'objet lui-même, lui, est posé par tagging/), pas une donnée
       // fausse — mais c'est exactement pour ça que la vérification manuelle porte
       // dessus (docs/verification-manuelle.md).
-      const iD = (globalThis as any).iD;
+      const iD = namespaceID();
       const write = (k: string, v: string): void => {
         try {
           if (iD && typeof iD.prefs === 'function') iD.prefs(k, v);
@@ -922,7 +1116,7 @@ function buildBridge(c: any): IdBridge {
     },
 
     insertNodeOnEdge(edge: [string, string], loc: LonLat): void {
-      const iD = (globalThis as any).iD;
+      const iD = namespaceID();
       const node = instancier(iD.osmNode, { loc });
       c.perform(
         instancier(iD.actionAddMidpoint, { loc, edge }, node),
@@ -945,7 +1139,7 @@ function buildBridge(c: any): IdBridge {
     },
 
     mergeBuildings(plan: Extract<MergePlan, { ok: true }>): void {
-      const iD = (globalThis as any).iD;
+      const iD = namespaceID();
       // Action maison plutôt qu'une action d'iD : aucune de ses actions ne remplace la
       // liste de nœuds d'une voie, et `perform` accepte n'importe quelle fonction de
       // graphe. On évite ainsi de deviner un nom d'action qui n'existe pas.
@@ -1042,8 +1236,11 @@ function buildBridge(c: any): IdBridge {
  * c'est-à-dire au pire moment, sur l'unique action que le greffon existe pour faire.
  */
 function instancier(fabrique: any, ...args: unknown[]): any {
+  // `String(fabrique)` plutôt que `Function.prototype.toString.call(fabrique)` : depuis le
+  // monde isolé (bridge/monde-isole.ts), la fabrique est un Proxy, dont toString.call ne
+  // rend pas la source ; String() passe par la membrane et lit celle de la page.
   const estClasse = typeof fabrique === 'function' &&
-    /^class[\s{]/.test(Function.prototype.toString.call(fabrique));
+    /^class[\s{]/.test(String(fabrique));
   return estClasse ? new fabrique(...args) : fabrique(...args);
 }
 
