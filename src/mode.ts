@@ -1,8 +1,11 @@
 import { composeAt } from './compose';
 import type { Composition } from './compose';
 import { buildDataset, type Dataset } from './cadastre/dataset';
-import { downloadCommune, downloadSurfacesForYear } from './cadastre/download';
+import {
+  downloadCommune, downloadSurfacesForYear, type Progression, type SuiviProgression,
+} from './cadastre/download';
 import { readCache, writeCache } from './cadastre/store';
+import { etape } from './cadastre/etape';
 import { communeAt } from './cadastre/insee';
 import { overlapsExisting } from './conflation/overlap';
 import { snapToExistingNodes, planInsertions, DEFAULT_SNAP_TOLERANCE_M } from './conflation/snap';
@@ -15,7 +18,8 @@ import type { IdBridge, HoleSpec } from './bridge/types';
 import type { LonLat } from './geometry/types';
 
 export interface ModeDeps {
-  loadDataset(pt: LonLat): Promise<Dataset>;
+  /** `suivi` reçoit l'avancement du téléchargement, affiché dans le bandeau. */
+  loadDataset(pt: LonLat, suivi?: SuiviProgression): Promise<Dataset>;
   /**
    * Code INSEE de la commune sous un point, ou null hors couverture.
    *
@@ -79,17 +83,31 @@ const RELOAD_DEBOUNCE_MS = 500;
  */
 const ATTENTE_MAX_MS = 60_000;
 
-async function defaultLoadDataset(pt: LonLat): Promise<Dataset> {
-  const commune = await communeAt(pt[1], pt[0]);
+/**
+ * Annonce la préparation de l'index puis rend la main au navigateur pour qu'il peigne le
+ * bandeau : `buildDataset` est synchrone et bloque le fil principal une à plusieurs
+ * secondes, et sans ce répit le bandeau resterait figé sur « 100 % » pendant ce temps.
+ */
+async function annoncerPreparation(suivi?: SuiviProgression): Promise<void> {
+  if (!suivi) return;
+  suivi({ etape: 'preparation' });
+  await new Promise<void>(r => {
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(r, 0));
+    else setTimeout(r, 0);
+  });
+}
+
+async function defaultLoadDataset(pt: LonLat, suivi?: SuiviProgression): Promise<Dataset> {
+  const commune = await etape('commune (geo.api.gouv.fr)', () => communeAt(pt[1], pt[0]));
   if (!commune) throw new CommuneIntrouvableError();
-  const cached = await readCache(commune.code);
+  const cached = await etape('lecture du cache', () => readCache(commune.code));
   if (cached) {
     // Une entrée écrite avant la prise en charge des surfaces n'en porte aucune (ou
     // seulement des piscines). Sans ce complément, la fonctionnalité n'existerait pas —
     // en silence — pour quiconque a déjà utilisé le greffon sur cette commune.
     let surfaces = cached.surfaces;
     if (surfaces === undefined) {
-      const complement = await downloadSurfacesForYear(cached.insee, cached.millesime);
+      const complement = await downloadSurfacesForYear(cached.insee, cached.millesime, undefined, suivi);
       console.log(`[sb-osm] ${complement.length} surface(s) ajoutées au cache de ${cached.insee}.`);
       if (complement.length > 0) {
         surfaces = complement;
@@ -103,9 +121,10 @@ async function defaultLoadDataset(pt: LonLat): Promise<Dataset> {
         surfaces = (cached.piscines ?? []) as typeof complement;
       }
     }
-    return buildDataset(cached.insee, cached.millesime, cached.features, surfaces);
+    await annoncerPreparation(suivi);
+    return etape('index', async () => buildDataset(cached.insee, cached.millesime, cached.features, surfaces));
   }
-  const { features, surfaces, millesime } = await downloadCommune(commune.code);
+  const { features, surfaces, millesime } = await downloadCommune(commune.code, undefined, suivi);
   // Le cache est un confort, jamais une condition du chargement : il est délibérément
   // HORS du chemin de retour. `await writeCache(...)` faisait échouer tout le
   // chargement APRÈS un téléchargement réussi si IndexedDB refusait l'écriture — un
@@ -116,7 +135,8 @@ async function defaultLoadDataset(pt: LonLat): Promise<Dataset> {
     .catch(err => console.warn(
       '[sb-osm] mise en cache impossible (les données restent utilisables, elles seront ' +
       'retéléchargées à la prochaine session) :', err));
-  return buildDataset(commune.code, millesime, features, surfaces);
+  await annoncerPreparation(suivi);
+  return etape('index', async () => buildDataset(commune.code, millesime, features, surfaces));
 }
 
 export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): CadastreMode {
@@ -187,7 +207,13 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
    * maintenant directement `loading`, qui a toujours eu la bonne garantie.
    */
   const startLoad = (pt: LonLat, apply: (d: Dataset) => void): Promise<void> => {
-    const p: Promise<void> = loadDataset(pt)
+    // Même garde d'identité que le résultat : un chargement supplanté n'écrit plus dans le
+    // bandeau. Mis à jour même bandeau masqué (Ctrl relâché), pour qu'il revienne à jour.
+    const suivi = (e: Progression): void => {
+      if (loading === p) (banniere ??= createLoadingBanner(bridge)).progression(e);
+    };
+    banniere?.progression(null);
+    const p: Promise<void> = loadDataset(pt, suivi)
       .then(d => {
         // Un chargement qui réussit, même s'il est périmé par un plus récent (et donc
         // pas appliqué ci-dessous), prouve que le réseau et l'API répondent : la
@@ -198,7 +224,13 @@ export function createMode(bridge: IdBridge, deps: Partial<ModeDeps> = {}): Cada
       .catch(err => {
         if (loading !== p) return; // une charge plus récente a déjà pris le relais
         attente = null; // pas de données, donc rien à rejouer : la panne est signalée une fois
-        notifyFailure(err instanceof CommuneIntrouvableError ? 'commune-introuvable' : 'reseau');
+        const introuvable = err instanceof CommuneIntrouvableError;
+        // La cause réelle en console : « vérifiez votre connexion » couvre aussi bien une
+        // requête refusée qu'une décompression ou un cache en échec, indiscernables sinon.
+        if (!introuvable) {
+          console.warn('[sb-osm] chargement du cadastre en échec :', String((err as Error)?.message ?? err), err);
+        }
+        notifyFailure(introuvable ? 'commune-introuvable' : 'reseau');
       })
       .finally(() => { if (loading === p) loading = null; rejouerSiPret(); });
     loading = p;

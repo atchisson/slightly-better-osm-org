@@ -152,6 +152,121 @@ describe('downloadCommune', () => {
   });
 });
 
+describe('progression du téléchargement', () => {
+  const gzip = async (text: string): Promise<ArrayBuffer> => {
+    const cs = new CompressionStream('gzip');
+    return new Response(new Blob([text]).stream().pipeThrough(cs)).arrayBuffer();
+  };
+
+  /** Réponse avec Content-Length, comme le bucket S3 (gzip servi sans Content-Encoding). */
+  const reponse = (corps: ArrayBuffer, avecTaille = true) => ({
+    ok: true, status: 200,
+    headers: new Headers(avecTaille ? { 'content-length': String(corps.byteLength) } : {}),
+    body: new Blob([corps]).stream(),
+  });
+
+  const depot = async (avecTaille = true, nb = 1) => {
+    const bat = await gzip(JSON.stringify({ features: Array.from({ length: 200 }, (_, i) => ({ i })) }));
+    const sur = await gzip(JSON.stringify({ features: [{ s: 1 }] }));
+    return {
+      bat, sur,
+      fetchFn: vi.fn().mockImplementation(async (url: string) => {
+        if (url === LISTING_URL) return { ok: true, status: 200, text: async () => listing('2026-06-01') };
+        return reponse(url.includes('tsurf') ? sur : bat, avecTaille);
+      }) as unknown as typeof fetch,
+      nb,
+    };
+  };
+
+  it('compte les octets compressés reçus, étape par étape, jusqu’au total annoncé', async () => {
+    const { bat, sur, fetchFn } = await depot();
+    const suivi = vi.fn();
+
+    await downloadCommune('49007', fetchFn, suivi);
+
+    const etapes = suivi.mock.calls.map(c => c[0]);
+    const bats = etapes.filter(e => e.etape === 'batiments');
+    const surs = etapes.filter(e => e.etape === 'surfaces');
+    expect(bats.at(-1)).toEqual({ etape: 'batiments', recu: bat.byteLength, total: bat.byteLength });
+    expect(surs.at(-1)).toEqual({ etape: 'surfaces', recu: sur.byteLength, total: sur.byteLength });
+    // les bâtiments d'abord, les surfaces ensuite
+    expect(etapes.findIndex(e => e.etape === 'surfaces'))
+      .toBeGreaterThan(etapes.map(e => e.etape).lastIndexOf('batiments'));
+    // jamais de recul ni de dépassement à l'intérieur d'une étape
+    for (let i = 1; i < bats.length; i++) expect(bats[i].recu).toBeGreaterThanOrEqual(bats[i - 1].recu);
+    for (const e of bats) if (e.total !== null) expect(e.recu).toBeLessThanOrEqual(e.total);
+  });
+
+  it('compte sans confier le moindre rappel à la page (monde isolé de Firefox)', async () => {
+    // Constaté en réel : depuis le monde isolé, `TransformStream` est le constructeur de
+    // la page, qui ne peut pas lire un objet du greffon — « Permission denied to access
+    // property "flush" », et plus aucun chargement. Le comptage ne doit pas en dépendre.
+    const { bat, fetchFn } = await depot();
+    const origine = globalThis.TransformStream;
+    (globalThis as any).TransformStream = class {
+      constructor() { throw new Error('Permission denied to access property "flush"'); }
+    };
+    try {
+      const suivi = vi.fn();
+      const r = await downloadCommune('49007', fetchFn, suivi);
+      expect(r.features).toHaveLength(200);
+      const bats = suivi.mock.calls.map(c => c[0]).filter(e => e.etape === 'batiments');
+      expect(bats.at(-1)).toEqual({ etape: 'batiments', recu: bat.byteLength, total: bat.byteLength });
+    } finally {
+      globalThis.TransformStream = origine;
+    }
+  });
+
+  it('ne lit le corps reçu que par son propre lecteur (monde isolé de Firefox)', async () => {
+    // Constaté dans Firefox 159 : depuis le monde isolé, le corps de `fetch` appartient au
+    // greffon et `DecompressionStream` à la page. Les brancher l'un sur l'autre
+    // (pipeThrough) avorte — « AbortError : The operation was aborted. » — et la page
+    // refuse les octets du greffon qu'on lui écrit. Seul le lecteur du corps est sûr.
+    const { bat, fetchFn } = await depot();
+    const interdit = (nom: string) => () => { throw new Error(`${nom} sur le corps reçu`); };
+    const lecteurSeul = vi.fn().mockImplementation(async (url: string) => {
+      const r = await (fetchFn as any)(url);
+      if (!r.body) return r;
+      const vrai = r.body as ReadableStream;
+      return {
+        ...r,
+        body: { getReader: () => vrai.getReader(), tee: interdit('tee'), pipeThrough: interdit('pipeThrough'), pipeTo: interdit('pipeTo') },
+      };
+    }) as unknown as typeof fetch;
+
+    for (const suivi of [undefined, vi.fn()]) {
+      const r = await downloadCommune('49007', lecteurSeul, suivi);
+      expect(r.features).toHaveLength(200);
+      expect(r.surfaces).toHaveLength(1);
+      if (suivi) {
+        const bats = suivi.mock.calls.map(c => c[0]).filter(e => e.etape === 'batiments');
+        expect(bats.at(-1)).toEqual({ etape: 'batiments', recu: bat.byteLength, total: bat.byteLength });
+      }
+    }
+  });
+
+  it('n’annonce aucun total quand la taille est inconnue', async () => {
+    const { bat, fetchFn } = await depot(false);
+    const suivi = vi.fn();
+
+    await downloadCommune('49007', fetchFn, suivi);
+
+    const bats = suivi.mock.calls.map(c => c[0]).filter(e => e.etape === 'batiments');
+    expect(bats.at(-1)).toEqual({ etape: 'batiments', recu: bat.byteLength, total: null });
+  });
+
+  it('n’annonce le total de Paris qu’une fois connue la taille des vingt arrondissements', async () => {
+    const { bat, fetchFn } = await depot();
+    const suivi = vi.fn();
+
+    await downloadCommune('75056', fetchFn, suivi);
+
+    const bats = suivi.mock.calls.map(c => c[0]).filter(e => e.etape === 'batiments');
+    for (const e of bats) if (e.total !== null) expect(e.total).toBe(20 * bat.byteLength);
+    expect(bats.at(-1)).toEqual({ etape: 'batiments', recu: 20 * bat.byteLength, total: 20 * bat.byteLength });
+  });
+});
+
 describe('surfaces', () => {
   const tsurf = (syms: string[]) => ({
     features: syms.map(SYM => ({

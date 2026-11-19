@@ -423,7 +423,7 @@ describe('mode cadastre', () => {
       declencherDeplacement();
       await vi.advanceTimersByTimeAsync(1000); // laisse le débounce puis le rechargement se dérouler
 
-      expect(loadDataset).toHaveBeenLastCalledWith([0.5, 0.5]);
+      expect(loadDataset).toHaveBeenLastCalledWith([0.5, 0.5], expect.any(Function));
 
       mode.hoverAt([0.5, 0.5]); // dans le bâtiment de B — absent de A
       expect(container.querySelector('path')!.getAttribute('d')).not.toBe('');
@@ -457,6 +457,53 @@ describe('mode cadastre', () => {
     await mode.whenReady();
 
     expect(notify).toHaveBeenCalledTimes(2);
+  });
+
+  // Relâcher puis rappuyer Ctrl pendant le chargement masque puis réaffiche le bandeau :
+  // c'est le même chargement qui se poursuit, jamais un second téléchargement.
+  it('un cycle désactivation / réactivation pendant un chargement ne relance pas loadDataset', async () => {
+    let terminer!: (d: Dataset) => void;
+    const loadDataset = vi.fn(() => new Promise<Dataset>(r => { terminer = r; }));
+    const mode = createMode(bridge, { loadDataset, communeName: async () => 'X', notify: vi.fn() });
+
+    mode.enable();
+    mode.disable();
+    mode.enable();
+    mode.disable();
+    mode.enable();
+    terminer(buildDataset('49007', '2026', [feature('01', carre(0, 0))]));
+    await mode.whenReady();
+    await Promise.resolve();
+
+    expect(loadDataset).toHaveBeenCalledTimes(1);
+  });
+
+  it('la progression du chargement s’affiche dans le bandeau, et seulement la sienne', async () => {
+    const suivis: ((p: unknown) => void)[] = [];
+    const fins: ((d: Dataset) => void)[] = [];
+    const loadDataset = vi.fn((_pt: LonLat, suivi?: (p: unknown) => void) => {
+      suivis.push(suivi!);
+      return new Promise<Dataset>(r => { fins.push(r); });
+    });
+    const mode = createMode(bridge, { loadDataset: loadDataset as never, communeName: async () => 'X', notify: vi.fn() });
+    const bandeau = () => container.querySelector('.sb-osm-loading') as HTMLElement;
+
+    mode.enable();
+    suivis[0]!({ etape: 'batiments', recu: 1_000_000, total: 4_000_000 });
+    expect(bandeau().textContent).toContain('1,0 / 4,0 Mo');
+    expect(bandeau().style.display).toBe('block');
+
+    // Ctrl relâché puis rappuyé : le bandeau revient avec la progression où elle en est.
+    mode.disable();
+    suivis[0]!({ etape: 'batiments', recu: 2_000_000, total: 4_000_000 });
+    mode.enable();
+    expect(bandeau().textContent).toContain('2,0 / 4,0 Mo');
+
+    fins[0]!(buildDataset('49007', '2026', [feature('01', carre(0, 0))]));
+    await mode.whenReady();
+    // un suivi tardif d'un chargement terminé n'écrit plus rien
+    suivis[0]!({ etape: 'surfaces', recu: 1, total: 2 });
+    expect(bandeau().textContent).not.toContain('surfaces');
   });
 
   // --- Revue finale (I2) : un déplacement ne recharge plus la commune entière ---

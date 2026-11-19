@@ -73,7 +73,7 @@ describe('defaultLoadDataset — migration du cache vers les surfaces', () => {
     mocks.readCache.mockResolvedValue({ insee: '49007', millesime: '2026', fetchedAt: 1, features: [batiment], piscines: [surface(0.003)] });
     mocks.downloadSurfacesForYear.mockResolvedValue([surface(0.005)]);
     expect(await survole(0.005)).toBe(true);
-    expect(mocks.downloadSurfacesForYear).toHaveBeenCalledWith('49007', '2026');
+    expect(mocks.downloadSurfacesForYear).toHaveBeenCalledWith('49007', '2026', undefined, expect.any(Function));
     expect(mocks.writeCache).toHaveBeenCalledOnce();
     const ecrit = (mocks.writeCache.mock.calls[0] as unknown[])[0] as Record<string, unknown>;
     expect(ecrit.surfaces).toEqual([surface(0.005)]);

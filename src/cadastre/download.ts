@@ -1,4 +1,5 @@
 import { arrondissementCodes, departementOf } from './insee';
+import { etape } from './etape';
 
 /**
  * Le dépôt Etalab est atteint DIRECTEMENT sur son bucket S3, sans passer par
@@ -65,7 +66,107 @@ export function tsurfUrl(insee: string, millesime: string): string {
 export const SYM_PISCINE = '65';
 
 /** Le jeu demandé n'existe pas à ce millésime — distinct de toute autre panne. */
-export class DatasetIntrouvable extends Error {}
+export class DatasetIntrouvable extends Error {
+  /** Traverse `etape` sans être enveloppée : le repli de millésime la reconnaît à son type. */
+  readonly intacte = true;
+}
+
+/**
+ * Où en est le chargement d'une commune. `recu` et `total` sont des octets COMPRESSÉS :
+ * le bucket sert ses `.json.gz` sans `Content-Encoding`, donc `Content-Length` est
+ * exactement ce qui transite. `total` vaut null tant que la taille d'un des fichiers de
+ * l'étape est inconnue (en-tête absent, ou pas encore reçu pour Paris et ses vingt
+ * arrondissements) : un pourcentage calculé sur une partie des fichiers sauterait en
+ * arrière à l'arrivée des suivants.
+ */
+export type Progression =
+  | { etape: 'batiments' | 'surfaces'; recu: number; total: number | null }
+  | { etape: 'preparation' };
+
+export type SuiviProgression = (p: Progression) => void;
+
+/** Compte les octets reçus sur les `n` fichiers d'une étape, téléchargés en parallèle. */
+interface Compteur {
+  entete(res: Response): void;
+  /** Des octets compressés viennent d'arriver. */
+  recu(octets: number): void;
+}
+
+const SANS_SUIVI: Compteur = { entete() {}, recu() {} };
+
+/**
+ * Lit un GeoJSON gzippé.
+ *
+ * Le corps reçu n'est lu QUE par son propre lecteur, et n'est jamais branché sur un autre
+ * flux. Depuis le monde isolé de Firefox, il appartient au greffon alors que
+ * `DecompressionStream`, `Blob` et `TextDecoder` appartiennent à la page (constaté dans
+ * Firefox 159) : `body.pipeThrough(new DecompressionStream())` y avorte
+ * (« AbortError : The operation was aborted. »), et la page refuse les octets du greffon
+ * écrits un à un dans son flux. Rassemblés dans un `Blob`, ces mêmes octets passent ;
+ * flux, décompression et lecture restent alors du même côté. Partout ailleurs (monde de
+ * la page, Chrome, tests), ce chemin est simplement ordinaire.
+ */
+async function lireGeoJson(
+  body: ReadableStream<Uint8Array<ArrayBuffer>>,
+  c: Compteur,
+): Promise<{ features?: unknown[] }> {
+  const morceaux = await etape('réception', () => lireOctets(body, c));
+  const texte = await etape('décompression', () => decompresserGzip(morceaux));
+  return etape('analyse JSON', async () => JSON.parse(texte) as { features?: unknown[] });
+}
+
+/** Tout le corps, morceau par morceau, en comptant les octets au passage. */
+async function lireOctets(
+  body: ReadableStream<Uint8Array<ArrayBuffer>>,
+  c: Compteur,
+): Promise<Uint8Array<ArrayBuffer>[]> {
+  const lecteur = body.getReader();
+  const morceaux: Uint8Array<ArrayBuffer>[] = [];
+  for (;;) {
+    const lu = await lecteur.read();
+    if (lu.done) return morceaux;
+    morceaux.push(lu.value);
+    c.recu(lu.value.byteLength);
+  }
+}
+
+async function decompresserGzip(morceaux: Uint8Array<ArrayBuffer>[]): Promise<string> {
+  const lecteur = new Blob(morceaux).stream().pipeThrough(new DecompressionStream('gzip')).getReader();
+  const decodeur = new TextDecoder();
+  let texte = '';
+  for (;;) {
+    const lu = await lecteur.read();
+    if (lu.done) return texte + decodeur.decode();
+    texte += decodeur.decode(lu.value, { stream: true });
+  }
+}
+
+function compteur(etape: 'batiments' | 'surfaces', n: number, suivi?: SuiviProgression): Compteur {
+  if (!suivi) return SANS_SUIVI;
+  let recu = 0;
+  let total = 0;
+  let connus = 0;
+  let inconnu = false;
+  const emettre = () => suivi({ etape, recu, total: connus === n && !inconnu ? total : null });
+  return {
+    entete(res) {
+      // Un fichier absent (tsurf en 404) ne transmettra rien : il compte pour zéro.
+      if (res.ok && res.body) {
+        const taille = Number(res.headers?.get?.('content-length'));
+        if (taille > 0) total += taille; else inconnu = true;
+      }
+      connus++;
+      emettre();
+    },
+    // Compté dans la lecture même du corps (voir lireGeoJson), sans `TransformStream` :
+    // depuis le monde isolé de Firefox, c'est le constructeur de la PAGE, qui ne peut pas
+    // lire l'objet du greffon (« Permission denied to access property "flush" »).
+    recu(octets) {
+      recu += octets;
+      emettre();
+    },
+  };
+}
 
 /**
  * Les millésimes publiés, du plus récent au plus ancien, lus dans le listing XML.
@@ -87,9 +188,11 @@ export function millesimesFromListing(xml: string): string[] {
 }
 
 async function fetchMillesimes(fetchFn: typeof fetch): Promise<string[]> {
-  const res = await fetchFn(LISTING_URL);
-  if (!res.ok) throw new Error(`le dépôt cadastre a répondu ${res.status} au listing`);
-  return millesimesFromListing(await res.text());
+  return etape('listing du dépôt', async () => {
+    const res = await fetchFn(LISTING_URL);
+    if (!res.ok) throw new Error(`le dépôt cadastre a répondu ${res.status} au listing`);
+    return millesimesFromListing(await res.text());
+  });
 }
 
 /**
@@ -106,13 +209,13 @@ async function downloadSurfaces(
   insee: string,
   millesime: string,
   fetchFn: typeof fetch,
+  c: Compteur = SANS_SUIVI,
 ): Promise<unknown[]> {
   try {
     const res = await fetchFn(tsurfUrl(insee, millesime));
+    c.entete(res);
     if (!res.ok || !res.body) return [];
-    const stream = res.body.pipeThrough(new DecompressionStream('gzip'));
-    const parsed = JSON.parse(await new Response(stream).text()) as { features?: unknown[] };
-    return parsed.features ?? [];
+    return (await lireGeoJson(res.body, c)).features ?? [];
   } catch {
     return [];
   }
@@ -136,13 +239,15 @@ export async function downloadSurfacesForYear(
   insee: string,
   annee: string,
   fetchFn: typeof fetch = fetch,
+  suivi?: SuiviProgression,
 ): Promise<unknown[]> {
   try {
     const millesimes = (await fetchMillesimes(fetchFn)).filter(d => d.startsWith(`${annee}-`));
     if (millesimes.length === 0) return [];
     const codes = arrondissementCodes(insee);
+    const c = compteur('surfaces', codes.length, suivi);
     const parts = await Promise.all(
-      codes.map(code => downloadSurfaces(code, millesimes[0]!, fetchFn)));
+      codes.map(code => downloadSurfaces(code, millesimes[0]!, fetchFn, c)));
     return parts.flat();
   } catch {
     return [];
@@ -153,8 +258,19 @@ async function downloadOne(
   insee: string,
   millesime: string,
   fetchFn: typeof fetch,
+  c: Compteur,
 ): Promise<unknown[]> {
-  const res = await fetchFn(datasetUrl(insee, millesime));
+  return etape(`bâtiments ${insee}`, () => downloadOneEtapes(insee, millesime, fetchFn, c));
+}
+
+async function downloadOneEtapes(
+  insee: string,
+  millesime: string,
+  fetchFn: typeof fetch,
+  c: Compteur,
+): Promise<unknown[]> {
+  const res = await etape('requête', () => fetchFn(datasetUrl(insee, millesime)));
+  c.entete(res);
   if (res.status === 404) {
     throw new DatasetIntrouvable(`${insee} absent du millésime ${millesime}`);
   }
@@ -163,14 +279,13 @@ async function downloadOne(
 
   // Le fichier est gzippé mais servi sans `Content-Encoding` (Content-Type
   // application/octet-stream) : le navigateur ne le décompresse donc pas tout seul.
-  const stream = res.body.pipeThrough(new DecompressionStream('gzip'));
-  const parsed = JSON.parse(await new Response(stream).text()) as { features?: unknown[] };
-  return parsed.features ?? [];
+  return (await lireGeoJson(res.body, c)).features ?? [];
 }
 
 export async function downloadCommune(
   insee: string,
   fetchFn: typeof fetch = fetch,
+  suivi?: SuiviProgression,
 ): Promise<{ features: unknown[]; surfaces: unknown[]; millesime: string }> {
   const millesimes = await fetchMillesimes(fetchFn);
 
@@ -197,10 +312,13 @@ export async function downloadCommune(
 
   for (const millesime of candidats) {
     try {
-      const parts = await Promise.all(codes.map(code => downloadOne(code, millesime, fetchFn)));
+      // Un compteur neuf par millésime essayé : un repli repart de zéro.
+      const cb = compteur('batiments', codes.length, suivi);
+      const parts = await Promise.all(codes.map(code => downloadOne(code, millesime, fetchFn, cb)));
       // Les surfaces seulement une fois les bâtiments obtenus : leur absence ne doit
       // jamais empêcher un repli de millésime sur les bâtiments, qui sont l'essentiel.
-      const surfaces = await Promise.all(codes.map(code => downloadSurfaces(code, millesime, fetchFn)));
+      const cs = compteur('surfaces', codes.length, suivi);
+      const surfaces = await Promise.all(codes.map(code => downloadSurfaces(code, millesime, fetchFn, cs)));
       if (millesime !== candidats[0]) {
         console.warn(
           `[sb-osm] ${insee} absent du millésime ${candidats[0]} ; repli sur ` +
