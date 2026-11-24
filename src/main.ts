@@ -5,6 +5,11 @@ import {
   mondeExecution, definirNamespaceID,
 } from './bridge/capture';
 import { outilsFirefox, creerMembrane, captureContextIsole } from './bridge/monde-isole';
+import { relancerApresInjectionTardive, oublierRelances, RELANCES_MAX } from './bridge/relance';
+
+function stockageDeSession(): Storage | null {
+  try { return window.sessionStorage; } catch { return null; }
+}
 import { installerOngletPrincipal } from './remote/onglet';
 import { createMode } from './mode';
 import { createCtrlShortcut } from './ui/shortcut';
@@ -88,11 +93,23 @@ void (async () => {
   // cadre principal peut encore servir, et il est fait à ce stade s'il doit l'être
   // (pendant l'appel à coreContext(), donc avant toute tâche ultérieure). Sans lui,
   // inutile d'attendre le chien de garde. `#id-container` est déjà analysé ici.
+  //
+  // Dans le monde isolé de Firefox, le cadre principal ne capture pas (voir plus haut) :
+  // une injection tardive de l'iframe n'y a aucun autre recours que le rechargement
+  // borné de l'iframe (bridge/relance.ts). Constaté sur la v0.4.2, qui l'avait retiré.
   if (injecteApresAmorcage(etatInjection) && looksLikeIdDocument(document) && !contexteDejaDepose(window)) {
+    const essai = relancerApresInjectionTardive(stockageDeSession(), () => location.reload());
+    if (essai > 0) {
+      console.warn(
+        `[sb-osm] script injecté trop tard (document « ${etatInjection} ») : osm.org avait ` +
+        `déjà créé le contexte iD. Rechargement de l'éditeur (essai ${essai}/${RELANCES_MAX}).`,
+      );
+      return;
+    }
     console.warn(
-      `[sb-osm] désactivé : script injecté trop tard (document « ${etatInjection} ») — osm.org ` +
-      "avait déjà créé le contexte iD, et le cadre principal n'a pas pu le capturer. Course " +
-      "d'injection du gestionnaire de userscripts, pas une rupture d'iD ; recharger la page.",
+      `[sb-osm] désactivé : script injecté trop tard (document « ${etatInjection} ») malgré ` +
+      `${RELANCES_MAX} rechargements — osm.org avait déjà créé le contexte iD, qui n'est plus ` +
+      "atteignable. Course d'injection du gestionnaire de userscripts, pas une rupture d'iD.",
     );
     return;
   }
@@ -142,6 +159,9 @@ void (async () => {
     ));
     return;
   }
+
+  // Capture réussie : un futur retard d'injection dans cet onglet repart de zéro.
+  oublierRelances(stockageDeSession());
 
   let bridge;
   try {
